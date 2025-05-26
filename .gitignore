@@ -4,11 +4,20 @@ __pycache__/
 .venv/
 venv/
 .env
+
 # VSCode
 .vscode/
+
 # macOS
 .DS_Store
+
 # Docker
 dist/
 build/
 *.egg-info/
+
+# Logs and outputs
+logs/
+results/optimized/
+results/evaluation_reports/
+results/evaluation_report.csv
