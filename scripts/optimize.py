@@ -25,7 +25,7 @@ def optimize_with_model(model_name, prompt):
         result = subprocess.run(
             ["ollama", "run", model_name],
             input=prompt,
-            capture_output=True, text=True, timeout=120
+            capture_output=True, text=True, timeout=300
         )
         if result.returncode == 0:
             return result.stdout.strip()
@@ -59,8 +59,9 @@ def main(model_name="gemma3:4b"):
             result = optimize_with_model(model_name, prompt)
 
             # 儲存優化結果
+            safe_model_name = model_name.replace(":", "_")
             output_file = os.path.join(
-                OUTPUT_DIR, f"{transcript_name}__{strategy['name']}.txt"
+                OUTPUT_DIR, f"{transcript_name}__{strategy['name']}__{safe_model_name}.txt"
             )
             with open(output_file, "w", encoding="utf-8") as f:
                 f.write(result)
