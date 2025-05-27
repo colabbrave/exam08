@@ -1,23 +1,71 @@
 # Python
 __pycache__/
 *.py[cod]
-.venv/
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
 venv/
+ENV/
+env/
 .env
 
-# VSCode
+# IDE
+.idea/
 .vscode/
+*.swp
+*.swo
+*~
 
-# macOS
+# Data files
+*.csv
+*.json
+*.pkl
+*.h5
+*.hdf5
+*.pth
+*.pt
+*.bin
+
+# Logs and databases
+*.log
+*.sql
+*.sqlite
+
+# Model files
+*.safetensors
+*.gguf
+*.ggml
+
+# OS generated files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
-# Docker
-dist/
-build/
-*.egg-info/
-
-# Logs and outputs
-logs/
-results/optimized/
-results/evaluation_reports/
-results/evaluation_report.csv
+# Project specific
+results/
+data/processed/
+data/raw/
+!data/raw/.gitkeep
+!data/processed/.gitkeep

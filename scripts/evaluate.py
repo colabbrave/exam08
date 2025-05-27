@@ -1,9 +1,40 @@
 import os
 import re
+import json
+import time
+import torch
+import argparse
 from glob import glob
 from pathlib import Path
 import difflib
 from collections import defaultdict
+from typing import Dict, List, Tuple, Optional, Any
+
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description='評估優化後的會議記錄')
+    parser.add_argument('--model', type=str, default=None,
+                      help='只評估指定模型的結果，例如：gemma3_4b')
+    parser.add_argument('--all-models', action='store_true',
+                      help='評估所有模型的結果（與 run_all_models.sh 配合使用）')
+    return parser.parse_args()
+
+# 評估指標相關
+try:
+    from bert_score import score as bert_score
+except ImportError:
+    print("警告: 未安裝 bert-score，請執行 'pip install bert-score'")
+    bert_score = None
+
+try:
+    from rouge_score import rouge_scorer, scoring
+except ImportError:
+    print("警告: 未安裝 rouge-score，請執行 'pip install rouge-score")
+    rouge_scorer = None
+
+# 類型別名
+ScoreDict = Dict[str, float]
+EvaluationResult = Dict[str, Dict[str, Dict[str, float]]]
 
 REFERENCE_DIR = "data/reference"
 OPTIMIZED_DIR = "results/optimized"
@@ -13,23 +44,66 @@ def load_text(filepath):
     with open(filepath, "r", encoding="utf-8") as f:
         return f.read().strip()
 
-def simple_similarity(a, b):
-    """使用 difflib 計算簡單相似度（可替換為更進階的評分指標）"""
+def calculate_bertscore(predictions: List[str], references: List[str]) -> Dict[str, float]:
+    if bert_score is None:
+        print("警告: bert-score 未安裝，跳過 BERTScore 計算")
+        return {"bertscore_precision": 0.0, "bertscore_recall": 0.0, "bertscore_f1": 0.0}
+    
+    try:
+        P, R, F1 = bert_score(
+            predictions,
+            references,
+            lang="zh",
+            verbose=True,
+            device="cuda" if torch.cuda.is_available() else "cpu"
+        )
+        return {
+            "bertscore_precision": float(P.mean().item()),
+            "bertscore_recall": float(R.mean().item()),
+            "bertscore_f1": float(F1.mean().item())
+        }
+    except Exception as e:
+        print(f"BERTScore 計算錯誤: {str(e)}")
+        return {"bertscore_precision": 0.0, "bertscore_recall": 0.0, "bertscore_f1": 0.0}
+
+def calculate_rouge(predictions: List[str], references: List[str]) -> Dict[str, float]:
+    if rouge_scorer is None:
+        print("警告: rouge-score 未安裝，跳過 ROUGE 計算")
+        return {"rouge_rouge1": 0.0, "rouge_rouge2": 0.0, "rouge_rougeL": 0.0}
+    
+    try:
+        scorer = rouge_scorer.RougeScorer(
+            ['rouge1', 'rouge2', 'rougeL'],
+            use_stemmer=True
+        )
+        
+        scores = []
+        for ref, pred in zip(references, predictions):
+            scores.append(scorer.score(ref, pred))
+        
+        avg_scores = {}
+        for key in scores[0]:
+            avg_scores[f"rouge_{key}"] = float(sum(s[key].fmeasure for s in scores) / len(scores))
+        
+        return avg_scores
+    except Exception as e:
+        print(f"ROUGE 計算錯誤: {str(e)}")
+        return {"rouge_rouge1": 0.0, "rouge_rouge2": 0.0, "rouge_rougeL": 0.0}
+
+def simple_similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a, b).ratio()
 
 def get_base_name(filename):
-    # 去除「逐字稿」、「會議紀錄」等後綴與副檔名
-    return filename.replace("逐字稿", "").replace("會議紀錄", "").replace("__", "").replace(".txt", "").replace(".md", "")
+    match = re.search(r'(第\d+次市政會議\d+年\d+月\d+日)', filename)
+    if match:
+        return match.group(1)
+    return filename.split('__')[0].replace("逐字稿", "").replace("會議紀錄", "").replace(".txt", "").replace(".md", "")
 
 def extract_model_name(filename):
-    """從檔案名稱中提取模型名稱"""
-    # 匹配最後一個雙下劃線後面的部分，直到文件擴展名之前
     match = re.search(r'__([^_].*?)(?:\.\w+)?$', filename)
     if match:
         model_name = match.group(1).strip()
-        # 處理一些常見的模型名稱格式
         if 'llama3-taide' in model_name:
-            # 處理類似 cwchang_llama3-taide-lx-8b-chat-alpha1_latest 的格式
             parts = model_name.split('_')
             if len(parts) > 2 and 'llama3-taide' in parts[1]:
                 return f"{parts[0]}/{parts[1]}_{parts[2]}"
@@ -37,94 +111,179 @@ def extract_model_name(filename):
     return "unknown_model"
 
 def extract_strategy_name(filename):
-    """從檔案名稱中提取策略名稱"""
-    # 匹配倒數第二個和第三個雙下劃線之間的部分作為策略名稱
     parts = [p for p in filename.split('__') if p]
     if len(parts) >= 3:
         return parts[-2]
     return "unknown_strategy"
 
-def main():
-    # 確保輸出目錄存在
-    os.makedirs(REPORT_DIR, exist_ok=True)
+def evaluate_texts(pred_text: str, ref_text: str) -> Dict[str, float]:
+    metrics = {
+        'simple_similarity': simple_similarity(pred_text, ref_text)
+    }
     
-    # 獲取所有優化文件（包括 .txt 和 .md 文件）
+    bert_scores = calculate_bertscore([pred_text], [ref_text])
+    metrics.update(bert_scores)
+    
+    rouge_scores = calculate_rouge([pred_text], [ref_text])
+    metrics.update(rouge_scores)
+    
+    weights = {
+        'simple_similarity': 0.2,
+        'bertscore_f1': 0.5,
+        'rouge_rougeL': 0.3
+    }
+    
+    weighted_score = sum(metrics[k] * weights.get(k, 0) for k in weights)
+    metrics['weighted_score'] = weighted_score
+    
+    return metrics
+
+def main():
+    args = parse_arguments()
+    
+    os.makedirs(REPORT_DIR, exist_ok=True)
+    os.makedirs(OPTIMIZED_DIR, exist_ok=True)
+    
+    reference_files = glob(f"{REFERENCE_DIR}/*.txt") + glob(f"{REFERENCE_DIR}/*.md")
+    if not reference_files:
+        print(f"錯誤: 在 {REFERENCE_DIR} 中找不到參考文件")
+        return
+    
+    results = defaultdict(lambda: defaultdict(dict))
+    model_metrics = defaultdict(lambda: defaultdict(list))
+    strategy_metrics = defaultdict(lambda: defaultdict(list))
+    
+    start_time = time.time()
+    
     optimized_files = []
     for ext in ('*.txt', '*.md'):
-        optimized_files.extend(glob(os.path.join(OPTIMIZED_DIR, '**', ext), recursive=True))
+        optimized_files.extend(glob(f"{OPTIMIZED_DIR}/**/{ext}", recursive=True))
     
-    # 按模型名稱分組結果
-    model_results = defaultdict(list)
+    if not optimized_files:
+        print(f"錯誤: 在 {OPTIMIZED_DIR} 中找不到優化後的文件")
+        return
     
+    processed_count = 0
     for opt_path in optimized_files:
-        opt_name = Path(opt_path).name
-        model_name = extract_model_name(opt_name)
-        strategy_name = extract_strategy_name(opt_name)
-        
-        # 獲取會議基本名稱（去除策略和模型信息）
-        base_name = opt_name.split('__')[0]
-        transcript_base = get_base_name(base_name)
-        
-        # 在 reference 目錄下尋找對應檔案
-        ref_path = None
-        for ref_file in os.listdir(REFERENCE_DIR):
-            if get_base_name(ref_file) == transcript_base:
-                ref_path = os.path.join(REFERENCE_DIR, ref_file)
-                break
-                
-        if not ref_path or not os.path.exists(ref_path):
-            print(f"找不到對應標準答案：{transcript_base}")
-            continue
-
         try:
+            opt_name = Path(opt_path).name
+            model_name = extract_model_name(opt_name)
+            
+            # 添加模型過濾邏輯
+            if args.model and not args.all_models and args.model.lower() not in model_name.lower():
+                continue
+                
+            strategy_name = extract_strategy_name(opt_name)
+            base_name = get_base_name(opt_name)
+            
+            ref_path = None
+            base_name_clean = get_base_name(opt_name)
+            
+            for ref_file in reference_files:
+                ref_base = get_base_name(ref_file)
+                if base_name_clean == ref_base:
+                    ref_path = ref_file
+                    break
+            
+            if not ref_path:
+                for ref_file in reference_files:
+                    ref_base = get_base_name(ref_file)
+                    if ref_base in base_name_clean or base_name_clean in ref_base:
+                        ref_path = ref_file
+                        break
+            
+            if not ref_path:
+                print(f"警告: 找不到 {opt_name} 的參考文件 (base: {base_name_clean})")
+                print(f"可用的參考文件: {[get_base_name(f) for f in reference_files]}")
+                continue
+                
             optimized_text = load_text(opt_path)
             reference_text = load_text(ref_path)
-            score = simple_similarity(optimized_text, reference_text)
             
-            result = {
-                "transcript": transcript_base,
-                "strategy": strategy_name,
-                "optimized_file": opt_name,
-                "reference_file": os.path.basename(ref_path),
-                "similarity_score": score
-            }
-            model_results[model_name].append(result)
+            if not optimized_text or not reference_text:
+                print(f"警告: {opt_name} 或參考文件為空")
+                continue
             
-            print(f"{opt_name}: 相似度 {score:.4f}")
+            metrics = evaluate_texts(optimized_text, reference_text)
+            
+            results[base_name][model_name][strategy_name] = metrics
+            
+            for metric_name, value in metrics.items():
+                model_metrics[model_name][metric_name].append(value)
+                strategy_metrics[strategy_name][metric_name].append(value)
+            
+            print(f"{opt_name}: 加權分數 {metrics.get('weighted_score', 0):.4f} (BERTScore F1: {metrics.get('bertscore_f1', 0):.4f}, ROUGE-L: {metrics.get('rouge_rougeL', 0):.4f})")
+            processed_count += 1
             
         except Exception as e:
-            print(f"處理文件 {opt_name} 時出錯: {str(e)}")
-    
-    # 為每個模型生成單獨的評估報告
-    for model_name, results in model_results.items():
-        if not results:
+            print(f"處理 {opt_name} 時出錯: {str(e)}")
             continue
-            
-        # 創建安全的模型名稱用於文件名
-        safe_model_name = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in model_name)
-        report_path = os.path.join(REPORT_DIR, f"evaluation_report_{safe_model_name}.csv")
-        
-        # 按相似度排序
-        results_sorted = sorted(results, key=lambda x: x["similarity_score"], reverse=True)
-        
-        # 寫入CSV文件
-        with open(report_path, "w", encoding="utf-8") as f:
-            # 寫入表頭
-            f.write("會議記錄,策略,相似度,優化檔案,參考檔案\n")
-            
-            # 寫入每一行數據
-            for r in results_sorted:
-                f.write(
-                    f'"{r["transcript"]}",'  # 會議記錄名稱
-                    f'"{r["strategy"]}",'       # 策略名稱
-                    f'{r["similarity_score"]:.4f},'  # 相似度分數
-                    f'"{r["optimized_file"]}",'  # 優化後檔案
-                    f'"{r["reference_file"]}"\n'  # 參考檔案
-                )
-        
-        print(f"\n模型 {model_name} 的評估報表已產生：{report_path}")
     
-    print("\n所有評估報表已生成在 results/evaluation_reports/ 目錄下")
+    if processed_count == 0:
+        print("錯誤: 沒有處理任何文件，請檢查文件路徑和格式")
+        return
+    
+    evaluation_time = time.time() - start_time
+    
+    print("\n=== 評估摘要 ===")
+    print(f"處理文件數: {processed_count}")
+    print(f"總用時: {evaluation_time:.2f} 秒")
+    
+    def print_metrics(metrics_dict: Dict[str, Dict[str, List[float]]], title: str) -> None:
+        print(f"\n=== {title} ===")
+        for name, metrics in metrics_dict.items():
+            print(f"\n{name}")
+            print("-" * 50)
+            for metric_name, values in metrics.items():
+                if values:
+                    avg = sum(values) / len(values)
+                    print(f"{metric_name}: {avg:.4f}")
+    
+    print_metrics(model_metrics, "模型評估結果")
+    print_metrics(strategy_metrics, "策略評估結果")
+    
+    detailed_results = {}
+    for base_name, models in results.items():
+        detailed_results[base_name] = {}
+        for model, strategies in models.items():
+            detailed_results[base_name][model] = {}
+            for strategy, metrics in strategies.items():
+                detailed_results[base_name][model][strategy] = {
+                    k: float(v) for k, v in metrics.items()
+                }
+    
+    report = {
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "evaluation_time_seconds": evaluation_time,
+        "files_processed": processed_count,
+        "models_evaluated": list(model_metrics.keys()),
+        "strategies_evaluated": list(strategy_metrics.keys()),
+        "metrics_used": ["simple_similarity", "bertscore_f1", "rouge_rougeL", "weighted_score"],
+        "detailed_results": detailed_results,
+        "model_averages": {
+            model: {metric: float(sum(values)/len(values)) for metric, values in metrics.items()}
+            for model, metrics in model_metrics.items()
+        },
+        "strategy_averages": {
+            strategy: {metric: float(sum(values)/len(values)) for metric, values in metrics.items()}
+            for strategy, metrics in strategy_metrics.items()
+        }
+    }
+    
+    report_path = os.path.join(REPORT_DIR, f"evaluation_report_{time.strftime('%Y%m%d_%H%M%S')}.json")
+    try:
+        with open(report_path, 'w', encoding='utf-8') as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+        print(f"\n評估完成！報告已保存至: {report_path}")
+    except Exception as e:
+        print(f"保存報告時出錯: {str(e)}")
+        print("\n報告摘要:")
+        print(json.dumps({
+            "files_processed": report["files_processed"],
+            "evaluation_time_seconds": report["evaluation_time_seconds"],
+            "models": report["models_evaluated"],
+            "strategies": report["strategies_evaluated"]
+        }, indent=2))
 
 if __name__ == "__main__":
     main()
