@@ -23,10 +23,17 @@ def get_base_name(filename):
 
 def extract_model_name(filename):
     """從檔案名稱中提取模型名稱"""
-    # 匹配最後一個雙下劃線後面的部分作為模型名稱
+    # 匹配最後一個雙下劃線後面的部分，直到文件擴展名之前
     match = re.search(r'__([^_].*?)(?:\.\w+)?$', filename)
     if match:
-        return match.group(1).strip()
+        model_name = match.group(1).strip()
+        # 處理一些常見的模型名稱格式
+        if 'llama3-taide' in model_name:
+            # 處理類似 cwchang_llama3-taide-lx-8b-chat-alpha1_latest 的格式
+            parts = model_name.split('_')
+            if len(parts) > 2 and 'llama3-taide' in parts[1]:
+                return f"{parts[0]}/{parts[1]}_{parts[2]}"
+        return model_name
     return "unknown_model"
 
 def extract_strategy_name(filename):

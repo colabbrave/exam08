@@ -1,9 +1,10 @@
 import os
 import json
+import time
 from glob import glob
 from pathlib import Path
 import subprocess
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 
 # 設定資料夾路徑
 DATA_DIR = "data"
@@ -23,10 +24,15 @@ def load_transcript(filepath: str) -> str:
         return f.read()
 
 # 呼叫 Ollama 產生優化結果
-def optimize_with_model(model_name: str, prompt: str, max_retries: int = 3) -> str:
+def optimize_with_model(model_name: str, prompt: str, max_retries: int = 3) -> tuple[str, float]:
+    """
+    使用指定模型優化文本
+    :return: (優化後的文本, 執行時間(秒))
+    """
     for attempt in range(max_retries):
         try:
             print(f"  正在呼叫模型 {model_name} (嘗試 {attempt + 1}/{max_retries})...")
+            start_time = time.time()
             result = subprocess.run(
                 ["ollama", "run", model_name],
                 input=prompt,
@@ -34,12 +40,15 @@ def optimize_with_model(model_name: str, prompt: str, max_retries: int = 3) -> s
                 text=True, 
                 timeout=600  # 增加超時時間到10分鐘
             )
+            end_time = time.time()
+            execution_time = end_time - start_time
             if result.returncode == 0:
                 output = result.stdout.strip()
                 if not output:
                     print("  警告：模型返回了空結果")
                     continue
-                return output
+                print(f"  模型回應時間: {execution_time:.2f} 秒")
+                return output, execution_time
             else:
                 print(f"  模型回應失敗 (嘗試 {attempt + 1}/{max_retries}): {result.stderr.strip()}")
         except subprocess.TimeoutExpired:
@@ -49,11 +58,10 @@ def optimize_with_model(model_name: str, prompt: str, max_retries: int = 3) -> s
         
         if attempt < max_retries - 1:
             print("  5秒後重試...")
-            import time
             time.sleep(5)
     
     print(f"  錯誤：無法獲取模型 {model_name} 的有效回應")
-    return ""
+    return "", 0.0
 
 def find_matching_reference(transcript_name: str) -> Optional[str]:
     """尋找對應的參考會議記錄"""
@@ -148,6 +156,9 @@ def assemble_prompt(strategy_data: Dict[str, Any], transcript: str, reference: O
 
 # 主流程
 def main(model_name: str = "gemma3:4b") -> None:
+    # 用於記錄每個模型的總響應時間和調用次數
+    model_timings = {}
+    strategy_timings = {}
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     strategies_data = load_strategies(STRATEGY_PATH)
     transcript_files = glob(os.path.join(TRANSCRIPT_DIR, "*.txt"))
@@ -191,11 +202,23 @@ def main(model_name: str = "gemma3:4b") -> None:
                         prompt = assemble_prompt(strategy, transcript, reference)
                         
                         # 呼叫模型進行優化
-                        result = optimize_with_model(model_name, prompt)
+                        result, exec_time = optimize_with_model(model_name, prompt)
                         
                         if not result:
                             print(f"  警告：{strategy_name} 優化失敗")
                             continue
+                            
+                        # 更新模型執行時間統計
+                        if model_name not in model_timings:
+                            model_timings[model_name] = {"total_time": 0.0, "count": 0}
+                        model_timings[model_name]["total_time"] += exec_time
+                        model_timings[model_name]["count"] += 1
+                        
+                        # 更新策略執行時間統計
+                        if strategy_name not in strategy_timings:
+                            strategy_timings[strategy_name] = {"total_time": 0.0, "count": 0}
+                        strategy_timings[strategy_name]["total_time"] += exec_time
+                        strategy_timings[strategy_name]["count"] += 1
                         
                         # 建立輸出目錄（如果不存在）
                         category_dir = os.path.join(OUTPUT_DIR, category)
@@ -243,3 +266,33 @@ if __name__ == "__main__":
     
     print("\n" + "=" * 50)
     print("會議記錄優化完成！")
+    
+    # 輸出模型執行時間統計
+    print("\n" + "=" * 50)
+    print("模型執行時間統計：")
+    print("-" * 50)
+    
+    # 確保 model_timings 已經被初始化
+    if 'model_timings' in locals() and model_timings:
+        for model, timing in model_timings.items():
+            count = timing.get("count", 1)
+            total_time = timing.get("total_time", 0.0)
+            avg_time = total_time / count if count > 0 else 0
+            print(f"{model}: 平均 {avg_time:.2f} 秒/次 (共 {count} 次, 總計 {total_time:.2f} 秒)")
+    else:
+        print("未記錄到模型執行時間數據")
+    
+    # 輸出策略執行時間統計
+    print("\n" + "=" * 50)
+    print("策略執行時間統計：")
+    print("-" * 50)
+    
+    # 確保 strategy_timings 已經被初始化
+    if 'strategy_timings' in locals() and strategy_timings:
+        for strategy, timing in strategy_timings.items():
+            count = timing.get("count", 1)
+            total_time = timing.get("total_time", 0.0)
+            avg_time = total_time / count if count > 0 else 0
+            print(f"{strategy}: 平均 {avg_time:.2f} 秒/次 (共 {count} 次, 總計 {total_time:.2f} 秒)")
+    else:
+        print("未記錄到策略執行時間數據")
