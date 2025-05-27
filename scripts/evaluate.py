@@ -36,9 +36,13 @@ except ImportError:
 ScoreDict = Dict[str, float]
 EvaluationResult = Dict[str, Dict[str, Dict[str, float]]]
 
-REFERENCE_DIR = "data/reference"
-OPTIMIZED_DIR = "results/optimized"
-REPORT_DIR = "results/evaluation_reports"
+# 使用絕對路徑避免相對路徑問題
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(SCRIPT_DIR)
+
+REFERENCE_DIR = os.path.join(ROOT_DIR, "data/reference")
+OPTIMIZED_DIR = os.path.join(ROOT_DIR, "results/optimized")
+REPORT_DIR = os.path.join(ROOT_DIR, "results/evaluation_reports")
 
 def load_text(filepath):
     with open(filepath, "r", encoding="utf-8") as f:
@@ -94,10 +98,19 @@ def simple_similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a, b).ratio()
 
 def get_base_name(filename):
+    # 匹配格式：第671次市政會議114年5月13日
     match = re.search(r'(第\d+次市政會議\d+年\d+月\d+日)', filename)
     if match:
         return match.group(1)
-    return filename.split('__')[0].replace("逐字稿", "").replace("會議紀錄", "").replace(".txt", "").replace(".md", "")
+    # 如果沒有匹配到，嘗試提取基本名稱（去掉後綴）
+    base = os.path.basename(filename)
+    # 移除文件擴展名
+    base = re.sub(r'\.[^.]+$', '', base)
+    # 移除策略和模型名稱部分（如果有）
+    base = re.sub(r'__[^_]+__[^_]+$', '', base)
+    # 移除多餘的「逐字稿」或「會議紀錄」字樣
+    base = base.replace("逐字稿", "").replace("會議紀錄", "").strip()
+    return base
 
 def extract_model_name(filename):
     match = re.search(r'__([^_].*?)(?:\.\w+)?$', filename)
@@ -155,9 +168,19 @@ def main():
     
     start_time = time.time()
     
+    print(f"正在搜尋參考文件: {REFERENCE_DIR}/*.{{txt,md}}")
+    reference_files = glob(f"{REFERENCE_DIR}/*.txt") + glob(f"{REFERENCE_DIR}/*.md")
+    print(f"找到 {len(reference_files)} 個參考文件")
+    
+    print(f"\n正在搜尋優化文件: {OPTIMIZED_DIR}/**/*.{{txt,md}}")
     optimized_files = []
     for ext in ('*.txt', '*.md'):
-        optimized_files.extend(glob(f"{OPTIMIZED_DIR}/**/{ext}", recursive=True))
+        files = glob(f"{OPTIMIZED_DIR}/**/*{ext}", recursive=True)
+        print(f"找到 {len(files)} 個 {ext} 文件")
+        optimized_files.extend(files)
+    
+    # 過濾掉可能的重複文件
+    optimized_files = list(dict.fromkeys(optimized_files))
     
     if not optimized_files:
         print(f"錯誤: 在 {OPTIMIZED_DIR} 中找不到優化後的文件")

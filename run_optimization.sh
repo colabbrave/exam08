@@ -169,8 +169,9 @@ main() {
     
     # 執行評估
     log "開始執行評估流程..."
-    # 將模型名稱中的 / 替換為 _ 以符合 evaluate.py 的參數格式
-    MODEL_ARG=${MODEL//\//_}
+    # 將模型名稱中的 / 替換為 _，並移除 : 後面的部分（如果有）
+    MODEL_ARG=$(echo "$MODEL" | sed 's/[:/]/_/g')
+    log "評估模型: $MODEL_ARG"
     if ! python "${SCRIPT_DIR}/scripts/evaluate.py" --model "$MODEL_ARG"; then
         log "錯誤: 評估流程失敗"
         exit 1
