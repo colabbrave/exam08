@@ -10,6 +10,18 @@ import difflib
 from collections import defaultdict
 from typing import Dict, List, Tuple, Optional, Any
 
+# 導入新的評估模組
+try:
+    from evaluation import MeetingEvaluator, EvaluationConfig
+    EVALUATOR_AVAILABLE = True
+except ImportError as e:
+    print(f"警告: 無法載入多指標評估模組: {str(e)}")
+    print("將使用舊版評估方法。請確保已安裝所有依賴項。")
+    EVALUATOR_AVAILABLE = False
+
+# 導入新的評估模組
+from evaluation import MeetingEvaluator, EvaluationConfig
+
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description='評估優化後的會議記錄')
@@ -17,9 +29,13 @@ def parse_arguments():
                       help='只評估指定模型的結果，例如：gemma3_4b')
     parser.add_argument('--all-models', action='store_true',
                       help='評估所有模型的結果（與 run_all_models.sh 配合使用）')
+    parser.add_argument('--use-legacy', action='store_true',
+                      help='使用舊版評估方法（僅用於比較）')
+    parser.add_argument('--report-dir', type=str, default=None,
+                      help='自定義報告輸出目錄')
     return parser.parse_args()
 
-# 評估指標相關
+# 評估指標相關（舊版兼容）
 try:
     from bert_score import score as bert_score
 except ImportError:
@@ -31,6 +47,19 @@ try:
 except ImportError:
     print("警告: 未安裝 rouge-score，請執行 'pip install rouge-score")
     rouge_scorer = None
+
+# 初始化新的評估器
+evaluator = None
+if EVALUATOR_AVAILABLE:
+    try:
+        evaluator = MeetingEvaluator()
+        print("已載入多指標評估系統")
+    except Exception as e:
+        print(f"警告: 無法初始化評估器: {str(e)}")
+        print("將使用舊版評估方法")
+        evaluator = None
+else:
+    print("警告: 將使用舊版評估方法")
 
 # 類型別名
 ScoreDict = Dict[str, float]
@@ -49,6 +78,7 @@ def load_text(filepath):
         return f.read().strip()
 
 def calculate_bertscore(predictions: List[str], references: List[str]) -> Dict[str, float]:
+    """舊版 BERTScore 計算（兼容用）"""
     if bert_score is None:
         print("警告: bert-score 未安裝，跳過 BERTScore 計算")
         return {"bertscore_precision": 0.0, "bertscore_recall": 0.0, "bertscore_f1": 0.0}
@@ -71,6 +101,7 @@ def calculate_bertscore(predictions: List[str], references: List[str]) -> Dict[s
         return {"bertscore_precision": 0.0, "bertscore_recall": 0.0, "bertscore_f1": 0.0}
 
 def calculate_rouge(predictions: List[str], references: List[str]) -> Dict[str, float]:
+    """舊版 ROUGE 計算（兼容用）"""
     if rouge_scorer is None:
         print("警告: rouge-score 未安裝，跳過 ROUGE 計算")
         return {"rouge_rouge1": 0.0, "rouge_rouge2": 0.0, "rouge_rougeL": 0.0}
@@ -95,7 +126,159 @@ def calculate_rouge(predictions: List[str], references: List[str]) -> Dict[str, 
         return {"rouge_rouge1": 0.0, "rouge_rouge2": 0.0, "rouge_rougeL": 0.0}
 
 def simple_similarity(a: str, b: str) -> float:
+    """簡單文本相似度計算"""
     return difflib.SequenceMatcher(None, a, b).ratio()
+
+def evaluate_with_metrics(pred_text: str, ref_text: str, use_legacy: bool = False, verbose: bool = True) -> Dict[str, float]:
+    """
+    使用多指標評估系統評估文本
+    
+    Args:
+        pred_text: 預測文本
+        ref_text: 參考文本
+        use_legacy: 是否使用舊版評估方法
+        verbose: 是否輸出詳細日誌
+        
+    Returns:
+        包含所有評估指標的字典
+    """
+    if not pred_text or not ref_text:
+        error_msg = "錯誤：評估文本或參考文本為空"
+        if verbose:
+            print(error_msg)
+        return {
+            'overall_score': 0.0,
+            'semantic_similarity': 0.0,
+            'content_coverage': 0.0,
+            'structure_quality': 0.0,
+            'weighted_score': 0.0,
+            'error': error_msg
+        }
+    
+    if use_legacy:
+        # 使用舊版評估方法
+        if verbose:
+            print("使用舊版評估方法...")
+            
+        metrics = {}
+        
+        try:
+            # 計算簡單相似度
+            metrics['simple_similarity'] = simple_similarity(pred_text, ref_text)
+            
+            # 計算 BERTScore
+            bert_scores = calculate_bertscore([pred_text], [ref_text])
+            metrics.update(bert_scores)
+            
+            # 計算 ROUGE 分數
+            rouge_scores = calculate_rouge([pred_text], [ref_text])
+            metrics.update(rouge_scores)
+            
+            # 計算加權分數
+            weights = {
+                'simple_similarity': 0.2,
+                'bertscore_f1': 0.5,
+                'rouge_rougeL': 0.3
+            }
+            
+            metrics['weighted_score'] = sum(metrics.get(k, 0) * weights.get(k, 0) for k in weights)
+            return metrics
+            
+        except Exception as e:
+            error_msg = f"舊版評估出錯: {str(e)}"
+            if verbose:
+                print(error_msg)
+            return {
+                'overall_score': 0.0,
+                'semantic_similarity': 0.0,
+                'content_coverage': 0.0,
+                'structure_quality': 0.0,
+                'weighted_score': 0.0,
+                'error': error_msg
+            }
+    else:
+        # 使用新版多指標評估系統
+        if verbose:
+            print("使用新版多指標評估系統...")
+            
+        try:
+            result = evaluator.evaluate(ref_text, pred_text)
+            
+            if not result or 'scores' not in result:
+                error_msg = "評估結果格式不正確"
+                if verbose:
+                    print(error_msg)
+                return {
+                    'overall_score': 0.0,
+                    'semantic_similarity': 0.0,
+                    'content_coverage': 0.0,
+                    'structure_quality': 0.0,
+                    'weighted_score': 0.0,
+                    'error': error_msg
+                }
+            
+            # 將結果轉換為與舊版兼容的格式
+            metrics = {
+                'overall_score': float(result.get('overall_score', 0.0)),
+                'semantic_similarity': float(result.get('scores', {}).get('semantic_similarity', {}).get('_weighted', 0.0)),
+                'content_coverage': float(result.get('scores', {}).get('content_coverage', {}).get('_weighted', 0.0)),
+                'structure_quality': float(result.get('scores', {}).get('structure_quality', {}).get('_weighted', 0.0)),
+                'weighted_score': float(result.get('overall_score', 0.0)),
+                'details': result.get('details', {})
+            }
+            
+            # 添加詳細指標
+            if 'semantic_similarity' in result.get('scores', {}):
+                sem = result['scores']['semantic_similarity']
+                metrics.update({
+                    'bertscore_f1': float(sem.get('bertscore_f1', 0.0))
+                })
+                
+            if 'content_coverage' in result.get('scores', {}):
+                cov = result['scores']['content_coverage']
+                metrics.update({
+                    'rouge_rouge1': float(cov.get('rouge1', 0.0)),
+                    'rouge_rouge2': float(cov.get('rouge2', 0.0)),
+                    'rouge_rougeL': float(cov.get('rougeL', 0.0))
+                })
+                
+            if verbose:
+                print(f"評估完成 - 總分: {metrics['overall_score']:.4f}")
+                print(f"語義相似度: {metrics['semantic_similarity']:.4f}")
+                print(f"內容覆蓋度: {metrics['content_coverage']:.4f}")
+                print(f"結構質量: {metrics['structure_quality']:.4f}")
+                
+            return metrics
+            
+        except Exception as e:
+            error_msg = f"評估時發生錯誤: {str(e)}"
+            if verbose:
+                print(error_msg)
+                import traceback
+                traceback.print_exc()
+                
+            return {
+                'overall_score': 0.0,
+                'semantic_similarity': 0.0,
+                'content_coverage': 0.0,
+                'structure_quality': 0.0,
+                'weighted_score': 0.0,
+                'error': error_msg
+            }
+
+def evaluate_texts(pred_text: str, ref_text: str, use_legacy: bool = False) -> Dict[str, float]:
+    """
+    評估文本對
+    
+    Args:
+        pred_text: 預測文本
+        ref_text: 參考文本
+        use_legacy: 是否使用舊版評估方法
+        
+    Returns:
+        包含評估指標的字典
+    """
+    return evaluate_with_metrics(pred_text, ref_text, use_legacy)
 
 def get_base_name(filename):
     # 匹配格式：第671次市政會議114年5月13日
@@ -129,33 +312,16 @@ def extract_strategy_name(filename):
         return parts[-2]
     return "unknown_strategy"
 
-def evaluate_texts(pred_text: str, ref_text: str) -> Dict[str, float]:
-    metrics = {
-        'simple_similarity': simple_similarity(pred_text, ref_text)
-    }
-    
-    bert_scores = calculate_bertscore([pred_text], [ref_text])
-    metrics.update(bert_scores)
-    
-    rouge_scores = calculate_rouge([pred_text], [ref_text])
-    metrics.update(rouge_scores)
-    
-    weights = {
-        'simple_similarity': 0.2,
-        'bertscore_f1': 0.5,
-        'rouge_rougeL': 0.3
-    }
-    
-    weighted_score = sum(metrics[k] * weights.get(k, 0) for k in weights)
-    metrics['weighted_score'] = weighted_score
-    
-    return metrics
-
 def main():
     args = parse_arguments()
     
-    os.makedirs(REPORT_DIR, exist_ok=True)
+    # 設置報告目錄
+    report_dir = args.report_dir or REPORT_DIR
+    os.makedirs(report_dir, exist_ok=True)
     os.makedirs(OPTIMIZED_DIR, exist_ok=True)
+    
+    print(f"使用評估模式: {'舊版' if (args.use_legacy or not EVALUATOR_AVAILABLE) else '新版多指標'}")
+    print(f"報告將保存至: {os.path.abspath(report_dir)}")
     
     reference_files = glob(f"{REFERENCE_DIR}/*.txt") + glob(f"{REFERENCE_DIR}/*.md")
     if not reference_files:
@@ -252,15 +418,28 @@ def main():
     print(f"處理文件數: {processed_count}")
     print(f"總用時: {evaluation_time:.2f} 秒")
     
-    def print_metrics(metrics_dict: Dict[str, Dict[str, List[float]]], title: str) -> None:
+    def print_metrics(metrics_dict: Dict[str, Dict[str, List[Any]]], title: str) -> None:
         print(f"\n=== {title} ===")
         for name, metrics in metrics_dict.items():
             print(f"\n{name}")
             print("-" * 50)
             for metric_name, values in metrics.items():
-                if values:
-                    avg = sum(values) / len(values)
+                if not values:
+                    continue
+                    
+                # 過濾掉非數值類型的值
+                numeric_values = []
+                for v in values:
+                    if isinstance(v, (int, float)):
+                        numeric_values.append(v)
+                    elif isinstance(v, dict) and 'f1' in v:  # 如果是包含 'f1' 的字典，使用 f1 值
+                        numeric_values.append(v['f1'])
+                
+                if numeric_values:  # 只有在有有效數值時才計算平均
+                    avg = sum(numeric_values) / len(numeric_values)
                     print(f"{metric_name}: {avg:.4f}")
+                else:
+                    print(f"{metric_name}: 無有效數值")
     
     print_metrics(model_metrics, "模型評估結果")
     print_metrics(strategy_metrics, "策略評估結果")
@@ -271,9 +450,38 @@ def main():
         for model, strategies in models.items():
             detailed_results[base_name][model] = {}
             for strategy, metrics in strategies.items():
-                detailed_results[base_name][model][strategy] = {
-                    k: float(v) for k, v in metrics.items()
-                }
+                detailed_results[base_name][model][strategy] = {}
+                for k, v in metrics.items():
+                    try:
+                        # 嘗試轉換為 Python 原生類型，以確保 JSON 序列化
+                        detailed_results[base_name][model][strategy][k] = float(v) if isinstance(v, (int, float, bool)) else str(v)
+                    except (ValueError, TypeError):
+                        # 如果轉換失敗，轉為字符串
+                        detailed_results[base_name][model][strategy][k] = str(v)
+    
+    def calculate_averages(metrics_dict):
+        """計算指標平均值，處理可能包含字典的值"""
+        averages = {}
+        for name, metrics in metrics_dict.items():
+            averages[name] = {}
+            for metric_name, values in metrics.items():
+                if not values:
+                    averages[name][metric_name] = None
+                    continue
+                    
+                # 過濾出數值或包含 'f1' 鍵的字典
+                numeric_values = []
+                for v in values:
+                    if isinstance(v, (int, float)):
+                        numeric_values.append(v)
+                    elif isinstance(v, dict) and 'f1' in v:
+                        numeric_values.append(v['f1'])
+                
+                if numeric_values:
+                    averages[name][metric_name] = float(sum(numeric_values) / len(numeric_values))
+                else:
+                    averages[name][metric_name] = None
+        return averages
     
     report = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -283,14 +491,8 @@ def main():
         "strategies_evaluated": list(strategy_metrics.keys()),
         "metrics_used": ["simple_similarity", "bertscore_f1", "rouge_rougeL", "weighted_score"],
         "detailed_results": detailed_results,
-        "model_averages": {
-            model: {metric: float(sum(values)/len(values)) for metric, values in metrics.items()}
-            for model, metrics in model_metrics.items()
-        },
-        "strategy_averages": {
-            strategy: {metric: float(sum(values)/len(values)) for metric, values in metrics.items()}
-            for strategy, metrics in strategy_metrics.items()
-        }
+        "model_averages": calculate_averages(model_metrics),
+        "strategy_averages": calculate_averages(strategy_metrics)
     }
     
     report_path = os.path.join(REPORT_DIR, f"evaluation_report_{time.strftime('%Y%m%d_%H%M%S')}.json")
