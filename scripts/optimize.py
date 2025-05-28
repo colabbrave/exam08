@@ -155,7 +155,7 @@ def assemble_prompt(strategy_data: Dict[str, Any], transcript: str, reference: O
     return "".join(prompt_parts)
 
 # 主流程
-def main(model_name: str = "gemma3:4b") -> None:
+def main(model_name: str = "cwchang/llama3-taide-lx-8b-chat-alpha1:latest") -> None:
     # 用於記錄每個模型的總響應時間和調用次數
     model_timings = {}
     strategy_timings = {}
@@ -255,7 +255,7 @@ def main(model_name: str = "gemma3:4b") -> None:
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="批次優化會議逐字稿")
-    parser.add_argument("--model", type=str, default="gemma3:4b", 
+    parser.add_argument("--model", type=str, default="cwchang/llama3-taide-lx-8b-chat-alpha1:latest", 
                        help="Ollama 模型名稱 (預設: gemma3:4b)")
     args = parser.parse_args()
     

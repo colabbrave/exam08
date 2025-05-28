@@ -39,13 +39,16 @@ fi
 
 # 創建虛擬環境
 VENV_NAME="venv"
-if [ ! -d "$VENV_NAME" ]; then
-    echo "創建虛擬環境..."
-    python3 -m venv $VENV_NAME
-    echo "✓ 虛擬環境已創建於 $VENV_NAME/"
-else
-    echo "✓ 虛擬環境已存在於 $VENV_NAME/"
+# 刪除已存在的虛擬環境
+if [ -d "$VENV_NAME" ]; then
+    echo "刪除現有的虛擬環境..."
+    rm -rf $VENV_NAME
 fi
+
+# 創建新的虛擬環境
+echo "創建新的虛擬環境..."
+python3 -m venv $VENV_NAME
+echo "✓ 虛擬環境已重新創建於 $VENV_NAME/"
 
 # 激活虛擬環境
 echo "激活虛擬環境..."
@@ -57,12 +60,23 @@ pip install --upgrade pip
 
 # 安裝依賴
 echo "安裝 Python 依賴..."
-pip install -r requirements.txt
-
-# 安裝開發依賴（如果存在）
-if [ -f "requirements-dev.txt" ]; then
-    echo "安裝開發依賴..."
-    pip install -r requirements-dev.txt
+if [ -f "requirements.txt" ]; then
+    # 先升級 pip 和 setuptools
+    pip install --upgrade pip setuptools
+    
+    # 安裝核心依賴
+    pip install torch --index-url https://download.pytorch.org/whl/cpu
+    
+    # 安裝其他依賴
+    pip install -r requirements.txt
+    
+    # 確保 scikit-learn 正確安裝
+    pip install --force-reinstall scikit-learn
+    
+    echo "✓ 已安裝所有依賴"
+else
+    echo "錯誤：未找到 requirements.txt 文件"
+    exit 1
 fi
 
 # 創建必要的目錄

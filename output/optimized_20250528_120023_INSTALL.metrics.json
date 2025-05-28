@@ -1,0 +1,8 @@
+{
+  "strategy": "summarize,rephrase,expand",
+  "num_candidates": 3,
+  "stability_threshold": 0.8,
+  "iterations_used": 1,
+  "final_stability": 1.0,
+  "evaluator_available": false
+}

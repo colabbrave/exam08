@@ -1,105 +1,126 @@
 {
-  "strategies": {
-    "A_角色定義": {
-      "A1": {
-        "name": "專業角色定義",
-        "description": "為會議記錄定義專業角色，確保語氣專業且一致",
-        "components": {
-          "role_definition": "你是一位專業的會議記錄專員，擁有5年行政經驗，擅長將口語轉換為結構化書面記錄。",
-          "tone_guidance": "使用正式、客觀的語氣，避免口語化表達。",
-          "example": {
-            "before": "我們決定要買新電腦",
-            "after": "會議決議：採購新設備以提升工作效率"
-          },
-          "avoid": [
-            "使用縮寫或非正式用語",
-            "加入個人意見或推測"
-          ]
-        },
-        "format_requirements": {
-          "output_structure": "使用標準會議記錄格式，包含：\n1. 會議標題\n2. 與會人員\n3. 討論事項\n4. 決議事項\n5. 待辦事項",
-          "length_guidance": "總字數控制在500-800字之間"
-        }
+  "A_role_definition_A1": {
+    "name": "專業角色定義",
+    "description": "為會議記錄定義專業角色，確保語氣專業且一致",
+    "components": {
+      "role_definition": "你是一位專業的會議記錄專員，擁有5年行政經驗，擅長將口語轉換為結構化書面記錄。",
+      "tone_guidance": "使用正式、客觀的語氣，避免口語化表達。",
+      "format": "markdown",
+      "sections": ["會議標題", "與會人員", "討論事項", "決議事項", "待辦事項"],
+      "example": {
+        "before": "我們決定要買新電腦",
+        "after": "## 會議決議\n採購新設備以提升工作效率"
       },
-      "A2": {
-        "name": "專業術語標準化",
-        "description": "確保專業術語使用一致且準確",
-        "components": {
-          "guidance": "使用行業標準術語，並在首次出現時提供簡要說明。",
-          "example": {
-            "before": "我們要用新的方式做這個",
-            "after": "將採用敏捷開發方法進行專案管理"
-          }
-        }
+      "avoid": ["使用縮寫或非正式用語", "加入個人意見或推測"]
+    },
+    "format_requirements": {
+      "required_sections": ["會議標題", "與會人員", "討論事項"],
+      "length_guidance": "總字數控制在500-800字之間"
+    }
+  },
+  "A_terminology_A2": {
+    "name": "專業術語標準化",
+    "description": "確保專業術語使用一致且準確",
+    "components": {
+      "format": "markdown",
+      "sections": ["標準化術語表", "應用範例"],
+      "guidance": "使用行業標準術語，並在首次出現時提供簡要說明。",
+      "example": {
+        "before": "我們要用新的方式做這個",
+        "after": "將採用敏捷開發(Agile)方法進行專案管理"
       }
     },
-    "B_結構優化": {
-      "B1": {
-        "name": "結構化摘要",
-        "description": "將會議記錄依議題、決議、待辦事項等分類，提升可讀性。",
-        "components": {
-          "guidance": "使用標題層級區分不同章節，確保層次分明。",
-          "example": {
-            "before": "大家討論了A、B、C...",
-            "after": "## 議題A\n### 討論內容\n...\n### 決議事項\n...\n### 待辦事項\n..."
-          }
-        }
-      },
-      "B2": {
-        "name": "明確標註發言者",
-        "description": "為每段發言加上發言者標籤，避免資訊混淆。",
-        "components": {
-          "guidance": "使用標準格式標註發言者，確保一致性。",
-          "example": {
-            "before": "我覺得這個方案不錯。",
-            "after": "王小明：我覺得這個方案不錯。"
-          }
-        }
+    "format_requirements": {
+      "required_sections": ["標準化術語表"]
+    }
+  },
+  "B_structure_B1": {
+    "name": "結構化摘要",
+    "description": "將會議記錄依議題、決議、待辦事項等分類，提升可讀性。",
+    "components": {
+      "format": "markdown",
+      "sections": ["議題", "討論內容", "決議事項", "待辦事項"],
+      "guidance": "使用標題層級區分不同章節，確保層次分明。",
+      "example": {
+        "before": "大家討論了A、B、C...",
+        "after": "## 議題A\n### 討論內容\n...\n### 決議事項\n...\n### 待辦事項\n..."
       }
     },
-    "C_內容優化": {
-      "C1": {
-        "name": "精簡冗詞",
-        "description": "刪除會議記錄中的重複或無意義詞彙，使內容更精煉。",
-        "components": {
-          "guidance": "移除重複詞語、口頭禪和不必要的修飾語。",
-          "example": {
-            "before": "這個這個我們我們今天討論的主題是...",
-            "after": "我們今天討論的主題是..."
-          }
-        }
-      },
-      "C2": {
-        "name": "補充省略資訊",
-        "description": "根據上下文補全未說明清楚的內容，使記錄更完整。",
-        "components": {
-          "guidance": "在方括號中補充必要的背景資訊。",
-          "example": {
-            "before": "那個案子就照上次說的辦。",
-            "after": "那個案子（指A專案）就照上次會議決議辦理。"
-          }
-        }
+    "format_requirements": {
+      "required_sections": ["議題", "決議事項"]
+    }
+  },
+  "B_speaker_B2": {
+    "name": "明確標註發言者",
+    "description": "為每段發言加上發言者標籤，避免資訊混淆。",
+    "components": {
+      "format": "markdown",
+      "sections": ["發言記錄"],
+      "guidance": "使用標準格式標註發言者，確保一致性。",
+      "example": {
+        "before": "我覺得這個方案不錯。",
+        "after": "[張經理] 我認為這個方案具有可行性。"
+      }
+    }
+  },
+  "C_optimization_C1": {
+    "name": "精簡冗詞",
+    "description": "刪除會議記錄中的重複或無意義詞彙，使內容更精煉。",
+    "components": {
+      "format": "markdown",
+      "sections": ["精簡前", "精簡後"],
+      "guidance": "移除重複詞語、口頭禪和不必要的修飾語。",
+      "example": {
+        "before": "這個這個我們我們今天討論的主題是...",
+        "after": "我們今天討論的主題是..."
       }
     },
-    "D_格式規範": {
-      "D1": {
-        "name": "標準格式模板",
-        "description": "確保會議記錄符合組織的標準格式要求。",
-        "components": {
-          "template": "---\n會議標題: \n時間: \n地點: \n與會人員: \n---\n## 討論事項\n### 議題一\n- 討論內容\n- 決議事項\n- 待辦事項\n## 下次會議\n- 時間: \n- 地點: \n- 預定議程: "
-        }
-      },
-      "D2": {
-        "name": "明確標示決議事項",
-        "description": "將會議中的決議事項明確標示，方便追蹤。",
-        "components": {
-          "guidance": "使用【決議】標籤標示所有決議事項。",
-          "example": {
-            "before": "那就這樣決定了。",
-            "after": "【決議】本案通過。"
-          }
-        }
+    "format_requirements": {
+      "required_sections": ["精簡後"]
+    }
+  },
+  "C_context_C2": {
+    "name": "補充省略資訊",
+    "description": "根據上下文補全未說明清楚的內容，使記錄更完整。",
+    "components": {
+      "format": "markdown",
+      "sections": ["原始內容", "補充後內容"],
+      "guidance": "在方括號中補充必要的背景資訊。",
+      "example": {
+        "before": "那個案子就照上次說的辦。",
+        "after": "那個案子（指A專案）就照上次會議決議辦理。"
       }
+    },
+    "format_requirements": {
+      "required_sections": ["補充後內容"]
+    }
+  },
+  "D_format_D1": {
+    "name": "標準格式模板",
+    "description": "確保會議記錄符合組織的標準格式要求。",
+    "components": {
+      "format": "markdown",
+      "sections": ["模板"],
+      "template": "---\n會議標題: \n時間: \n地點: \n與會人員: \n---\n## 討論事項\n### 議題一\n- 討論內容\n- 決議事項\n- 待辦事項\n## 下次會議\n- 時間: \n- 地點: \n- 預定議程: "
+    },
+    "format_requirements": {
+      "required_sections": ["模板"]
+    }
+  },
+  "D_resolution_D2": {
+    "name": "明確標示決議事項",
+    "description": "將會議中的決議事項明確標示，方便追蹤。",
+    "components": {
+      "format": "markdown",
+      "sections": ["決議事項"],
+      "guidance": "使用【決議】標籤標示所有決議事項。",
+      "example": {
+        "before": "那就這樣決定了。",
+        "after": "【決議】本案通過。"
+      }
+    },
+    "format_requirements": {
+      "required_sections": ["決議事項"]
     }
   },
   "metadata": {

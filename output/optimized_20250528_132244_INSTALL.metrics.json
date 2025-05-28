@@ -1,0 +1,8 @@
+{
+  "strategy": "A_role_definition_A1,A_terminology_A2,B_structure_B1",
+  "num_candidates": 3,
+  "stability_threshold": 0.8,
+  "iterations_used": 1,
+  "final_stability": 1.0,
+  "evaluator_available": false
+}

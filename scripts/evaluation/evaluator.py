@@ -1,18 +1,21 @@
 """
 評估器實現
 
-實現多指標評估邏輯
+實現多指標評估邏輯，包括穩定性評估
 """
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional, Any, Union
 import json
 from pathlib import Path
+import numpy as np
 from .config import EvaluationConfig, MetricCategory, MetricConfig
+from .stability_metrics import StabilityMetrics
 
 class MeetingEvaluator:
     """會議記錄評估器"""
     
     def __init__(self, config: Optional[EvaluationConfig] = None):
         self.config = config or EvaluationConfig()
+        self.stability_metrics = StabilityMetrics()
         self._initialize_metrics()
     
     def _initialize_metrics(self):
@@ -36,20 +39,42 @@ class MeetingEvaluator:
             candidate: 待評估文本
             
         Returns:
-            包含各項指標分數的字典
+            包含各項指標分數的字典，格式為：
+            {
+                'categories': {
+                    'category_name': {
+                        'name': str,
+                        'score': float,
+                        'metrics': {
+                            'metric_name': {
+                                'score': float,
+                                'weight': float,
+                                'details': Any
+                            }
+                        }
+                    }
+                },
+                'overall_score': float
+            }
         """
         results = {
-            "scores": {},
-            "details": {}
+            'categories': {},
+            'overall_score': 0.0
         }
         
         # 計算各項指標
         for category_name, category in self.config.categories.items():
-            if not category.enabled:
-                continue
+            if not category.enabled or category_name == "stability":
+                continue  # 穩定性指標在 evaluate_stability 中單獨處理
                 
-            category_scores = {}
-            category_details = {}
+            category_result = {
+                'name': category.name,
+                'score': 0.0,
+                'metrics': {}
+            }
+            
+            total_weight = 0.0
+            weighted_sum = 0.0
             
             for metric_name, metric_config in category.metrics.items():
                 if not metric_config.enabled:
@@ -58,47 +83,100 @@ class MeetingEvaluator:
                 if metric_name in self.metric_calculators:
                     try:
                         score, details = self.metric_calculators[metric_name](reference, candidate)
-                        category_scores[metric_name] = score
-                        category_details[metric_name] = details
+                        category_result['metrics'][metric_name] = {
+                            'score': score,
+                            'weight': metric_config.weight,
+                            'details': details
+                        }
+                        weighted_sum += score * metric_config.weight
+                        total_weight += metric_config.weight
                     except Exception as e:
                         print(f"計算指標 {metric_name} 時出錯: {str(e)}")
-                        category_scores[metric_name] = 0.0
-                        category_details[metric_name] = {"error": str(e)}
+                        category_result['metrics'][metric_name] = {
+                            'score': 0.0,
+                            'weight': metric_config.weight,
+                            'details': {'error': str(e)}
+                        }
             
             # 計算類別加權分數
-            if category_scores:
-                total_weight = sum(
-                    metric.weight 
-                    for metric in category.metrics.values() 
-                    if metric.enabled and metric.name in category_scores
-                )
-                
-                if total_weight > 0:
-                    weighted_score = sum(
-                        score * (metric.weight / total_weight)
-                        for metric_name, score in category_scores.items()
-                        if (metric := category.metrics.get(metric_name))
-                    )
-                    category_scores["_weighted"] = weighted_score
-                
-                results["scores"][category_name] = category_scores
-                results["details"][category_name] = category_details
+            if total_weight > 0:
+                category_result['score'] = weighted_sum / total_weight
+            
+            results['categories'][category_name] = category_result
         
         # 計算總分
         total_weight = sum(
             cat.weight 
             for cat in self.config.categories.values() 
-            if cat.enabled and cat.name in results.get("scores", {}) and "_weighted" in results["scores"].get(cat.name, {})
+            if cat.enabled and cat.name in results['categories']
         )
         
         if total_weight > 0:
-            results["overall_score"] = sum(
-                results["scores"].get(cat.name, {}).get("_weighted", 0) * (cat.weight / total_weight)
+            results['overall_score'] = sum(
+                results['categories'][cat.name]['score'] * (cat.weight / total_weight)
                 for cat in self.config.categories.values()
-                if cat.enabled and cat.name in results.get("scores", {}) and "_weighted" in results["scores"].get(cat.name, {})
+                if cat.enabled and cat.name in results['categories']
             )
         
         return results
+        
+    def evaluate_stability(self, texts: List[str]) -> Dict[str, float]:
+        """
+        評估一組文本的穩定性
+        
+        Args:
+            texts: 待評估的文本列表
+            
+        Returns:
+            包含穩定性指標的字典
+        """
+        return self.stability_metrics.calculate_all_metrics(texts)
+    
+    def evaluate_batch(self, references: Union[str, List[str]], candidates: List[str]) -> Dict[str, Any]:
+        """
+        批量評估候選文本
+        
+        Args:
+            references: 參考文本或參考文本列表
+            candidates: 候選文本列表
+            
+        Returns:
+            包含評估結果的字典
+        """
+        # 如果參考文本是單個，則重複以匹配候選文本數量
+        if isinstance(references, str):
+            references = [references] * len(candidates)
+            
+        if len(references) != len(candidates):
+            raise ValueError(f"參考文本數量({len(references)})與候選文本數量({len(candidates)})不匹配")
+            
+        # 評估每個候選的質量
+        quality_results = []
+        for ref, cand in zip(references, candidates):
+            result = self.evaluate(ref, cand)
+            quality_results.append(result)
+        
+        # 評估穩定性
+        stability_results = self.evaluate_stability(candidates)
+        
+        # 計算平均質量分數
+        avg_quality = np.mean([r.get("overall_score", 0) for r in quality_results]) if quality_results else 0.0
+        
+        # 計算穩定性分數（將變異係數轉換為穩定性分數）
+        stability_score = (
+            0.4 * stability_results.get("format_consistency", 0) +
+            0.3 * (1 - min(stability_results.get("length_variation", 1), 1)) +  # 變異係數越小越好
+            0.3 * stability_results.get("key_entities_consistency", 0)
+        )
+        
+        # 合併結果
+        return {
+            "quality": quality_results,
+            "stability": stability_results,
+            "average_quality": avg_quality,
+            "stability_score": stability_score,
+            "overall_score": 0.7 * avg_quality + 0.3 * stability_score
+        }
     
     # 以下是各個指標的具體實現
     def _calculate_bertscore(self, reference: str, candidate: str, max_retries: int = 2) -> Tuple[float, dict]:

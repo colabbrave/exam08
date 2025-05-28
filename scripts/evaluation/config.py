@@ -53,7 +53,7 @@ class EvaluationConfig:
     def _initialize_default_config(self):
         """初始化默認配置"""
         # 1. 語義相似度
-        semantic = MetricCategory("semantic_similarity", weight=0.5)
+        semantic = MetricCategory("semantic_similarity", weight=0.3)
         semantic.add_metric(MetricConfig(
             name="bertscore_f1",
             weight=1.0,
@@ -98,6 +98,26 @@ class EvaluationConfig:
             description="列表使用適當性"
         ))
         self.add_category(structure)
+        
+        # 4. 穩定性
+        stability = MetricCategory("stability", weight=0.2)
+        stability.add_metric(MetricConfig(
+            name="format_consistency",
+            weight=0.4,
+            description="格式一致性（多次生成的格式相似度）"
+        ))
+        stability.add_metric(MetricConfig(
+            name="length_variation",
+            weight=0.3,
+            description="長度穩定性（長度變異係數）",
+            higher_is_better=False
+        ))
+        stability.add_metric(MetricConfig(
+            name="key_entities_consistency",
+            weight=0.3,
+            description="關鍵實體一致性"
+        ))
+        self.add_category(stability)
     
     def add_category(self, category: MetricCategory):
         """添加指標類別"""

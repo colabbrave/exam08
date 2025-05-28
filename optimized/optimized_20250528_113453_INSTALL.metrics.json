@@ -1,0 +1,123 @@
+{
+  "overall_score": 0.3957319754441888,
+  "categories": {
+    "semantic_similarity": {
+      "name": "semantic_similarity",
+      "score": 0.7586950063705444,
+      "metrics": {
+        "bertscore_f1": {
+          "score": 0.7586950063705444,
+          "weight": 1.0,
+          "details": {
+            "precision": 0.7591935396194458,
+            "recall": 0.7581971883773804,
+            "f1": 0.7586950063705444
+          }
+        }
+      }
+    },
+    "content_coverage": {
+      "name": "content_coverage",
+      "score": 0.9444881593785239,
+      "metrics": {
+        "rouge1": {
+          "score": 0.9625360230547549,
+          "weight": 0.3,
+          "details": {
+            "precision": 0.9823529411764705,
+            "recall": 0.943502824858757,
+            "fmeasure": 0.9625360230547549
+          }
+        },
+        "rouge2": {
+          "score": 0.9217391304347827,
+          "weight": 0.4,
+          "details": {
+            "precision": 0.9408284023668639,
+            "recall": 0.9034090909090909,
+            "fmeasure": 0.9217391304347827
+          }
+        },
+        "rougeL": {
+          "score": 0.9567723342939481,
+          "weight": 0.3,
+          "details": {
+            "precision": 0.9764705882352941,
+            "recall": 0.9378531073446328,
+            "fmeasure": 0.9567723342939481
+          }
+        }
+      }
+    },
+    "structure_quality": {
+      "name": "structure_quality",
+      "score": -0.9718468468468469,
+      "metrics": {
+        "section_heading_quality": {
+          "score": 0.6666666666666667,
+          "weight": 0.4,
+          "details": {
+            "reference_headings": [
+              "# 會議記錄優化工具安裝與使用指南",
+              "## 環境要求",
+              "## 安裝步驟",
+              "## 下載模型",
+              "## 使用方法",
+              "### 1. 優化單個會議記錄",
+              "### 2. 批量處理多個會議記錄",
+              "# 創建輸出目錄",
+              "# 處理目錄中的所有 .txt 文件",
+              "### 3. 評估優化效果",
+              "# 評估單個優化結果",
+              "# 查看評估報告",
+              "## 進階選項",
+              "### 使用不同的模型",
+              "### 調整生成長度",
+              "# 增加生成長度限制",
+              "## 疑難排解",
+              "### 記憶體不足",
+              "### 模型下載問題",
+              "## 貢獻指南",
+              "## 授權"
+            ],
+            "candidate_headings": [
+              "# 會議記錄優化工具安裝與使用指南",
+              "## 會議標題：優化工具安裝與使用指南",
+              "## 與會人員：[待填寫 - 需記錄所有參與者姓名]",
+              "## 討論事項：",
+              "## 決議事項：",
+              "## 待辦事項：",
+              "## 環境要求：",
+              "## 安裝步驟：",
+              "## 模型下載：",
+              "## 使用方法：",
+              "## 進階選項：",
+              "## 疑難排解：",
+              "## 貢獻指南：",
+              "## 授權：[在此添加授權信息]"
+            ],
+            "similarity": 0.6666666666666667
+          }
+        },
+        "paragraph_structure": {
+          "score": 0.6216216216216216,
+          "weight": 0.3,
+          "details": {
+            "reference_paragraph_count": 37,
+            "candidate_paragraph_count": 23,
+            "similarity": 0.6216216216216216
+          }
+        },
+        "list_usage": {
+          "score": -4.75,
+          "weight": 0.3,
+          "details": {
+            "reference_list_count": 4,
+            "candidate_list_count": 27,
+            "similarity": -4.75
+          }
+        }
+      }
+    }
+  }
+}
