@@ -10,6 +10,9 @@ import difflib
 from collections import defaultdict
 from typing import Dict, List, Tuple, Optional, Any
 
+# 強制 transformers/bert-score 只用本地模型
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
 # 導入新的評估模組
 try:
     from evaluation import MeetingEvaluator, EvaluationConfig
