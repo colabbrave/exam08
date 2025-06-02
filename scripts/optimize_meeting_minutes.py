@@ -1,40 +1,67 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Meeting Minutes Optimizer Script
+會議記錄優化與評估系統 - 核心優化引擎
+依據 act.md 流程實現完整的疊代優化、評分、策略管理、early stopping
 """
-import sys
+
+from scripts.evaluation.config import EvaluationConfig
 import os
+import sys
 import json
+import time
 import logging
 import argparse
+import subprocess
+import re
+from glob import glob
 from pathlib import Path
+from typing import Dict, List, Any, Optional, Tuple
+from dataclasses import dataclass, asdict
 from datetime import datetime
-from typing import Dict, Any, Optional, Tuple, List
 
-# 添加項目根目錄到 Python 路徑
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-print(f"Python path: {sys.path}")
+# 專案根目錄
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
-# 嘗試導入 MeetingEvaluator
+# 導入評估模組
 try:
-    try:
-        import sklearn
-        from scripts.evaluation.evaluator import MeetingEvaluator
-        print("Successfully imported MeetingEvaluator with scikit-learn support")
-    except ImportError as e:
-        print(f"Warning: scikit-learn is not available, disabling advanced evaluation features: {str(e)}")
-        from scripts.evaluation.evaluator import MeetingEvaluator as _BaseEvaluator
-        # 創建一個簡化版的 MeetingEvaluator
-        class MeetingEvaluator(_BaseEvaluator):
-            def evaluate(self, *args, **kwargs):
-                print("Warning: Using dummy evaluator because scikit-learn is not available")
-                return {"overall_score": 0.0, "status": "sklearn_not_available"}
-        print("Created dummy MeetingEvaluator")
-except Exception as e:
-    print(f"Warning: Could not import MeetingEvaluator, stability evaluation will be disabled: {str(e)}")
-    MeetingEvaluator = None
+    from evaluation import MeetingEvaluator, EvaluationConfig
+    EVALUATOR_AVAILABLE = True
+except ImportError:
+    print("警告: 無法載入評估模組，將建立基本評估功能")
+    EVALUATOR_AVAILABLE = False
+
+def get_evaluator_class():
+    """取得 MeetingEvaluator 類別"""
+    from scripts.evaluation.evaluator import MeetingEvaluator
+    return MeetingEvaluator
+
+@dataclass
+class OptimizationResult:
+    """優化結果資料結構"""
+    iteration: int
+    strategy_combination: List[str]
+    minutes_content: str
+    scores: Dict[str, float]
+    execution_time: float
+    timestamp: str
+    model_used: str
+
+@dataclass
+class OptimizationConfig:
+    """優化配置"""
+    max_iterations: int = 5
+    quality_threshold: float = 0.8
+    min_improvement: float = 0.02
+    strategy_max_count: int = 3
+    model_name: str = "cwchang/llama3-taide-lx-8b-chat-alpha1:latest"
+    optimization_model: str = "gemma3:12b"
+    enable_early_stopping: bool = True
+    save_all_iterations: bool = True
+
+evaluator_class = get_evaluator_class()
 
 class StrategyConfig:
     """Strategy configuration"""
@@ -50,19 +77,37 @@ class MeetingOptimizer:
     
     def __init__(self, model_name: str = "cwchang/llama3-taide-lx-8b-chat-alpha1:latest", 
                  output_dir: Optional[str] = None,
-                 strategy_config_path: Optional[Path] = None):
+                 strategy_config_path: Optional[Path] = None,
+                 log_file: Optional[str] = None):
         """Initialize the meeting optimizer"""
         self.model_name = model_name
         self.output_dir = Path(output_dir) if output_dir else Path.cwd() / "optimized_results"
-        self.evaluator = MeetingEvaluator() if MeetingEvaluator else None
-        self.logger = logging.getLogger(__name__)
+        self.evaluator = evaluator_class()
         self.strategies: Dict[str, StrategyConfig] = {}
+
+        # Logger 設定
+        self.logger = logging.getLogger("MeetingOptimizer")
+        self.logger.setLevel(logging.DEBUG)
+        if self.logger.hasHandlers():
+            self.logger.handlers.clear()
+            
+        # log file 路徑
+        log_path = Path(log_file) if log_file else (self.output_dir.parent / "logs" / "optimization_debug.log")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # 創建輸出目錄
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        # 檔案處理器
+        file_handler = logging.FileHandler(log_path, encoding="utf-8")
+        file_handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
         
-        # 加載策略配置
-        self._load_strategies(strategy_config_path or (project_root / "config" / "improvement_strategies.json"))
+        # 控制台處理器
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(formatter)
+        self.logger.addHandler(console_handler)
+
         self.logger.info(f"使用 Ollama 模型: {model_name}")
         
         # 初始化默認模板
@@ -79,8 +124,14 @@ class MeetingOptimizer:
 
 行動項目:
 {action_items}"""
-    
-    def _load_strategies(self, config_path: Path):
+
+        # 創建輸出目錄
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        # 修正 _load_strategies 需 Path 型別
+        config_path = Path(strategy_config_path) if strategy_config_path else Path(project_root) / "config" / "improvement_strategies.json"
+        self._load_strategies(config_path)
+
+    def _load_strategies(self, config_path: Path) -> None:
         """Load strategies from configuration file"""
         if not config_path.exists():
             self.logger.warning(f"策略配置文件 {config_path} 未找到，使用默認策略")
@@ -128,7 +179,7 @@ class MeetingOptimizer:
             self.logger.error(f"從 {config_path} 加載策略失敗: {str(e)}")
             self._load_default_strategies()
     
-    def _load_default_strategies(self):
+    def _load_default_strategies(self) -> None:
         """Load default strategies when config file is not available"""
         self.strategies = {
             "default": StrategyConfig(
@@ -153,10 +204,11 @@ class MeetingOptimizer:
         }
         self.logger.info("已加載默認策略")
     
-    def optimize(self, matched_data: List[Dict], max_iterations: int = 100, batch_size: int = 3,
-                warmup_iterations: int = 2, early_stopping: int = 30, min_improvement: float = 0.01) -> Tuple[str, Dict, float]:
+    def optimize(self, matched_data: List[Dict], max_iterations: int = 2,
+                batch_size: int = 3, warmup_iterations: int = 2,
+                early_stopping: int = 30, min_improvement: float = 0.01) -> Tuple[str, Dict[str, float], float]:
         """
-        執行完整的優化流程
+        執行完整的優化流程，嘗試多組模板與提示，根據評分自動選優
         
         Args:
             matched_data: 匹配的逐字稿和參考會議記錄列表
@@ -170,164 +222,419 @@ class MeetingOptimizer:
             tuple: (最佳模板, 最佳策略, 最佳分數)
         """
         self.logger.info(f"開始優化流程，共 {len(matched_data)} 組數據")
-        
-        # 初始化最佳結果
-        best_template = self.default_template
-        best_strategy = {}
+        self.logger.debug(f"[DEBUG] optimize() matched_data: {json.dumps(matched_data, ensure_ascii=False)[:1000]}")
+        # 多組模板
+        template_candidates = [
+            self.default_template,
+            """# 會議記錄\n\n**主題：** {topic}\n**時間：** {time}\n**與會人員：** {participants}\n\n## 討論要點\n{key_points}\n\n## 決議事項\n{decisions}\n\n## 行動項目\n{action_items}""",
+            """[會議摘要]\n主題: {topic}\n時間: {time}\n人員: {participants}\n重點: {key_points}\n決議: {decisions}\n行動: {action_items}"""
+        ]
+        best_template = template_candidates[0]
         best_score = 0.0
-        
-        # 迭代優化
-        for iteration in range(max_iterations):
+        best_metrics = {}
+        best_minutes = None
+        current_template = self.default_template
+        current_strategy = {}
+        for iteration in range(max_iterations):  # 依 max_iterations 疊代
             self.logger.info(f"\n=== 迭代 {iteration + 1}/{max_iterations} ===")
-            
-            # 1. 生成會議記錄
+            # 強制 flush logger，確保 log 立即寫入
+            for handler in self.logger.handlers:
+                handler.flush()
+            # 本輪只用一個 template（可改為多個）
             generated = self._generate_minutes_batch(
-                matched_data[:batch_size], 
-                best_template,
-                best_strategy
+                matched_data[:batch_size],
+                current_template,
+                current_strategy
             )
-            
-            # 2. 評估生成的會議記錄
             scores = self._evaluate_minutes_batch(
-                generated, 
+                generated,
                 [d['reference'] for d in matched_data[:batch_size]]
             )
-            
-            # 3. 更新最佳結果
-            current_score = sum(scores.values()) / len(scores) if scores else 0.0
-            if current_score > best_score + min_improvement:
-                best_score = current_score
-                self.logger.info(f"發現新的最佳分數: {best_score:.4f}")
-                
-                # 保存最佳模板和策略
-                self._save_best_template(best_template, best_strategy, best_score)
-            
-            # 4. 檢查早停條件
-            if iteration > warmup_iterations and (iteration - warmup_iterations) >= early_stopping:
-                self.logger.info(f"達到早停條件，停止優化")
-                break
+            bert_score = scores.get("bertscore_f1", 0)
+            taiwan_score = scores.get("taiwan_score", 0)
+            weighted_score = 0.7 * bert_score + 0.3 * taiwan_score
+            self.logger.info(f"[TEMPLATE] 疊代 {iteration+1} 綜合分數 (BERTScore*0.7+TaiwanScore*0.3)={weighted_score:.4f} (BERTScore={bert_score:.4f}, TaiwanScore={taiwan_score:.4f})")
+            if (
+                weighted_score > best_score + min_improvement
+                and generated
+                and generated[0].strip()
+                and not generated[0].strip().startswith('{')
+                and generated[0].strip() != current_template.strip()
+            ):
+                best_score = weighted_score
+                best_template = current_template
+                best_metrics = dict(scores)
+                best_minutes = generated[0]
+                self.logger.info(f"[TEMPLATE] 發現新最佳 minutes (綜合分數={weighted_score:.4f})")
+            # 儲存本輪最佳 minutes
+            if best_minutes:
+                self._save_best_minutes(best_minutes, best_metrics, best_score)
+            # 呼叫 LLM refine template/strategy
+            transcript = matched_data[0]["transcript"]
+            reference = matched_data[0]["reference"]
+            new_template, new_strategy = self._refine_template_and_strategy_with_llm(transcript, best_minutes or generated[0], reference)
+            if new_template:
+                self.logger.info("[LLM] 疊代取得新 template，將用於下輪。")
+                current_template = new_template
+            if new_strategy:
+                self.logger.info(f"[LLM] 疊代取得新策略建議: {new_strategy}")
+                current_strategy = new_strategy
+            # 強制 flush logger，確保 log 即時寫入
+            for handler in self.logger.handlers:
+                if hasattr(handler, 'flush'):
+                    handler.flush()
+        # 回傳最佳 minutes 內容（非模板）
+        return best_minutes if best_minutes else best_template, best_metrics, best_score
+    
+    def _generate_minutes_batch(self, data: List[Dict], template: str,
+                             strategy: Dict) -> List[str]:
+        """批量生成會議記錄，呼叫 Ollama LLM"""
+        import requests
         
-        return best_template, best_strategy, best_score
-    
-    def _generate_minutes_batch(self, data: List[Dict], template: str, strategy: Dict) -> List[str]:
-        """批量生成會議記錄"""
-        # 這裡應該是調用模型生成會議記錄的代碼
-        # 簡化示例：直接返回模板
-        return [template for _ in data]
-    
-    def _evaluate_minutes_batch(self, generated: List[str], references: List[str]) -> Dict[str, float]:
-        """批量評估會議記錄"""
-        if not self.evaluator:
-            self.logger.warning("評估器不可用，跳過評估")
-            return {}
-            
-        try:
-            # 這裡應該是調用評估器的代碼
-            # 簡化示例：返回隨機分數
-            import random
-            return {'score': random.uniform(0.5, 1.0) for _ in generated}
-        except Exception as e:
-            self.logger.error(f"評估會議記錄時出錯: {str(e)}")
-            return {}
-    
-    def _save_best_template(self, template: str, strategy: Dict, score: float) -> None:
-        """保存最佳模板和策略"""
-        try:
-            # 保存模板
-            template_file = self.output_dir / "best_template.txt"
-            with open(template_file, 'w', encoding='utf-8') as f:
-                f.write(template)
-            
-            # 保存策略
-            strategy_file = self.output_dir / "best_strategy.json"
-            with open(strategy_file, 'w', encoding='utf-8') as f:
-                json.dump(strategy, f, ensure_ascii=False, indent=2)
-                
-            self.logger.info(f"已保存最佳模板和策略到 {self.output_dir}")
-            
-        except Exception as e:
-            self.logger.error(f"保存最佳模板和策略時出錯: {str(e)}")
+        results = []
+        for idx, item in enumerate(data):
+            transcript = item.get('transcript', '')
+            transcript_file = item.get('transcript_file', '')
 
-def main():
-    """Main function"""
-    parser = argparse.ArgumentParser(description="Meeting Minutes Optimizer")
-    
-    # Add arguments
-    parser.add_argument("--input", type=str, required=True, help="Input file path")
-    parser.add_argument("--output", type=str, help="Output directory (default: ./output)")
-    parser.add_argument("--model", type=str, default="gemma3:4b", help="Ollama model name (default: gemma3:4b)")
-    parser.add_argument("--strategy", type=str, default="all", help="Optimization strategy to use (comma-separated)")
-    parser.add_argument("--num-candidates", type=int, default=3, help="Number of candidates to generate (default: 3)")
-    parser.add_argument("--stability-threshold", type=float, default=0.8, 
-                        help="Stability threshold for evaluation (default: 0.8)")
-    parser.add_argument("--max-iterations", type=int, default=5, 
-                        help="Maximum number of optimization iterations (default: 5)")
-    parser.add_argument("--list-strategies", action="store_true", 
-                        help="List available strategies and exit")
-    parser.add_argument("--strategy-config", type=str, 
-                        help="Path to strategy configuration file")
-    
-    args = parser.parse_args()
-    
-    # Initialize logger
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Create optimizer
-    optimizer = MeetingOptimizer(
-        model_name=args.model,
-        strategy_config_path=Path(args.strategy_config) if args.strategy_config else None
-    )
-    
-    # List strategies if requested
-    if args.list_strategies:
-        print("\nAvailable optimization strategies:")
-        for strategy_id, strategy in optimizer.strategies.items():
-            print(f"\nID: {strategy_id}")
-            print(f"Name: {strategy.name}")
-            print(f"Description: {strategy.description}")
-        return
-    
-    # Process input file
-    try:
-        with open(args.input, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Optimize content
-        optimized_content, metrics = optimizer.optimize(
-            text=content,
-            strategy=args.strategy,
-            num_candidates=args.num_candidates,
-            stability_threshold=args.stability_threshold,
-            max_iterations=args.max_iterations
-        )
-        
-        # Save result
-        output_dir = Path(args.output) if args.output else Path("output")
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_file = output_dir / f"optimized_{timestamp}_{Path(args.input).name}"
-        
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(optimized_content)
-        
-        # Save metrics if available
-        if metrics:
-            metrics_file = output_file.with_suffix('.metrics.json')
-            with open(metrics_file, 'w', encoding='utf-8') as f:
-                json.dump(metrics, f, indent=2, ensure_ascii=False)
-        
-        print(f"\nOptimization complete!")
-        print(f"Output file: {output_file}")
-        if metrics:
-            print(f"Evaluation metrics: {metrics_file}")
-    
-    except Exception as e:
-        logging.error(f"Error processing file: {str(e)}", exc_info=True)
-        sys.exit(1)
+            try:
+                # 從檔名和逐字稿內容萃取會議資訊 
+                meeting_info = self._extract_meeting_info(transcript, transcript_file)
+                
+                # 增強提示詞內容與結構
+                prompt = f"""
+請根據以下會議資訊與逐字稿內容，產生一份完整的結構化會議記錄。
 
-if __name__ == "__main__":
-    main()
+### 固定資訊 (不可更改)
+會議編號：{meeting_info["number"] or "無編號"}
+會議主題：{meeting_info["topic"] or "市政會議"}
+會議日期：{meeting_info["date"]}
+
+### 您的任務
+1. 嚴格按照以下格式產出會議記錄：
+```markdown
+# 會議記錄
+
+會議編號：{meeting_info["number"] or "無編號"} 
+會議名稱：{meeting_info["topic"] or "市政會議"}
+會議日期：{meeting_info["date"]}
+
+## 與會人員
+主席：
+出席人員：
+列席人員：
+
+## 討論事項
+### 一、例行表揚與頒獎
+...
+
+### 二、主席致詞重點
+...
+
+### 三、專案報告
+1. 「你一定要知道的是電器的選擇」(消防局)
+   - 統計分析:
+   - 主要建議:
+   - 改善措施:
+
+### 四、提案討論
+1. 案號:
+   提案機關:
+   案由:
+   決議:
+
+## 決議事項
+1. ...
+2. ...
+
+## 臨時動議與指示事項
+...
+
+## 散會時間
+...
+```
+
+2. 內容要求：
+   - 必須按照上述格式排版
+   - 準確摘錄會議中的重要決定、指示及共識
+   - 清楚列出各項目的討論要點和結論
+   - 使用客觀、公正的語氣描述
+   - 避免冗長敘述，以重點條列呈現
+
+逐字稿內容：
+{transcript}
+
+請按照指定格式提供完整的會議記錄。
+"""
+
+                try:
+                    response = requests.post(
+                        "http://localhost:11434/api/generate",
+                        json={
+                            "model": self.model_name,
+                            "prompt": prompt,
+                            "stream": False
+                        },
+                        timeout=300  # 延長超時時間至 300 秒
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        content = result.get("response", "").strip()
+                        self.logger.debug(f"[DEBUG] Batch {idx} LLM response:\n{content}")
+                        
+                        # 檢查生成的內容是否符合格式要求
+                        if not content or content.isspace():
+                            self.logger.warning(f"[WARNING] 生成的會議記錄為空，使用模板替代")
+                            results.append(template)
+                        else:
+                            results.append(content)
+                    else:
+                        self.logger.error(f"Ollama API 回應失敗: {response.status_code} {response.text}")
+                        results.append(template)
+                except requests.exceptions.Timeout:
+                    self.logger.error(f"Ollama API 請求超時")
+                    results.append(template)
+                except requests.exceptions.RequestException as e:
+                    self.logger.error(f"Ollama API 請求異常: {str(e)}")
+                    results.append(template)
+                    
+            except Exception as e:
+                self.logger.error(f"生成會議記錄過程中發生錯誤: {str(e)}")
+                results.append(template)
+                
+        return results
+
+    def _extract_meeting_info(self, transcript: str, transcript_file: str) -> Dict[str, str]:
+        """從逐字稿內容和檔名萃取會議資訊"""
+        info = {
+            "number": "",
+            "topic": "",
+            "date": "",
+            "participants": "",
+            "time": ""
+        }
+
+        # 1. 從檔名萃取資訊
+        if transcript_file:
+            try:
+                # 匹配「第XXX次市政會議XXX年XX月XX日」格式的檔名
+                match = re.search(r'第(\d+)次市政會議(\d+)年(\d+)月(\d+)日', transcript_file)
+                if match:
+                    number = match.group(1)
+                    year = int(match.group(2)) + 1911  # 民國年轉西元年
+                    month = match.group(3).zfill(2)
+                    day = match.group(4).zfill(2)
+                    
+                    info["number"] = number
+                    info["topic"] = f"第{number}次市政會議"
+                    info["date"] = f"{year}年{month}月{day}日"
+            except Exception as e:
+                self.logger.error(f"解析檔名時發生錯誤: {str(e)}")
+
+        # 2. 從逐字稿內容萃取資訊
+        if transcript:
+            try:
+                # 嘗試找出會議編號和主題
+                match = re.search(r'召開台中市政府第(\d+)次市政會議', transcript)
+                if match and not info["number"]:
+                    number = match.group(1)
+                    info["number"] = number
+                    info["topic"] = f"第{number}次市政會議"
+
+                # 如果檔名未提供日期，嘗試從內容萃取
+                if not info["date"]:
+                    date_match = re.search(r'(\d{3})年(\d{1,2})月(\d{1,2})日', transcript)
+                    if date_match:
+                        year = int(date_match.group(1)) + 1911  # 民國年轉西元年
+                        month = date_match.group(2).zfill(2)
+                        day = date_match.group(3).zfill(2)
+                        info["date"] = f"{year}年{month}月{day}日"
+
+                # 嘗試找出與會人員
+                participants_match = re.search(r'各位([\w、，]+)大家好', transcript)
+                if participants_match:
+                    info["participants"] = participants_match.group(1).replace("、", "、").replace("，", "、")
+            except Exception as e:
+                self.logger.error(f"解析逐字稿內容時發生錯誤: {str(e)}")
+
+        return info
+
+    def _evaluate_minutes_batch(self, generated_minutes: List[str], reference_minutes: List[str]) -> Dict[str, float]:
+        """評估生成的會議記錄品質，回傳指標 dict"""
+        scores = {}
+        try:
+            if self.evaluator:
+                for idx, (gen, ref) in enumerate(zip(generated_minutes, reference_minutes)):
+                    eval_result = self.evaluator.evaluate(gen, ref)
+                    for metric, score in eval_result.items():
+                        if metric not in scores:
+                            scores[metric] = 0.0
+                        scores[metric] += score / len(generated_minutes)
+            else:
+                self.logger.warning("評估器未啟用，無法評估生成品質")
+                scores = {"overall_score": 0.5}  # 預設分數
+        except Exception as e:
+            self.logger.error(f"評估過程中發生錯誤: {str(e)}")
+            scores = {"overall_score": 0.0}  # 錯誤時的預設分數
+        return scores
+
+    def _save_best_minutes(self, minutes: str, metrics: Dict[str, float], score: float) -> None:
+        """儲存最佳的會議記錄 (同時存 json 與 txt)"""
+        self.logger.info(f"儲存最佳會議記錄，綜合分數: {score:.4f}")
+        topic = metrics.get("topic", "無主題")
+        date = metrics.get("date", "無日期")
+        number = metrics.get("number", "無編號")
+        base_name = f"{topic}_{date}_{number}_優化後".replace("/", "_").replace(" ", "_")
+        json_path = self.output_dir / f"{base_name}.json"
+        txt_path = self.output_dir / f"{base_name}.txt"
+
+        # 檢查檔案是否已存在，若存在則改名
+        if json_path.exists() or txt_path.exists():
+            counter = 1
+            while (self.output_dir / f"{base_name}_{counter}.json").exists() or (self.output_dir / f"{base_name}_{counter}.txt").exists():
+                counter += 1
+            json_path = self.output_dir / f"{base_name}_{counter}.json"
+            txt_path = self.output_dir / f"{base_name}_{counter}.txt"
+
+        # 儲存 json
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump({
+                "minutes": minutes,
+                "metrics": metrics,
+                "score": score
+            }, f, ensure_ascii=False, indent=4)
+        # 儲存 txt（只存 minutes 純文字）
+        with open(txt_path, 'w', encoding='utf-8') as f:
+            f.write(minutes)
+        self.logger.info(f"最佳會議記錄已儲存至: {json_path} 及 {txt_path}")
+    
+    def _save_best_template(self, template: str, metrics: Dict[str, float], score: float) -> None:
+        """儲存最佳的模板"""
+        self.logger.info(f"儲存最佳模板，綜合分數: {score:.4f}")
+        # 儲存格式：模板_會議主題_日期_會議編號.json
+        topic = metrics.get("topic", "無主題")
+        date = metrics.get("date", "無日期")
+        number = metrics.get("number", "無編號")
+        file_name = f"模板_{topic}_{date}_{number}.json".replace("/", "_").replace(" ", "_")
+        file_path = self.output_dir / file_name
+        
+        # 檢查檔案是否已存在，若存在則改名
+        if file_path.exists():
+            base_name = file_path.stem
+            extension = file_path.suffix
+            counter = 1
+            while file_path.exists():
+                file_path = self.output_dir / f"{base_name}_{counter}{extension}"
+                counter += 1
+        
+        # 儲存檔案
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump({
+                "template": template,
+                "metrics": metrics,
+                "score": score
+            }, f, ensure_ascii=False, indent=4)
+        
+        self.logger.info(f"最佳模板已儲存至: {file_path}")
+    
+    def _refine_template_and_strategy_with_llm(self, transcript: str, best_minutes: str, reference: str) -> tuple:
+        """
+        呼叫 Gemma3:12B，根據逐字稿、最佳 minutes、reference，自動優化 template 與策略
+        回傳 (new_template, new_strategy_dict)
+        """
+        import requests
+        prompt = f"""
+你是一位會議記錄優化專家。請根據下列三份資料：
+1. 逐字稿：\n{transcript}\n
+2. 目前最佳 minutes：\n{best_minutes}\n
+3. 標準 reference 會議記錄：\n{reference}\n
+請分析最佳 minutes 與 reference 的差異，並針對 minutes 結構、格式、重點提取、條列方式等，提出具體改進建議。
+請直接輸出：
+A. 新的 minutes 產生模板（以 {{topic}}、{{date}}、{{participants}} 等變數標示）
+B. 策略參數建議（如哪些重點要強化、哪些格式要調整，請用 JSON 格式）
+
+請用如下格式回覆：
+---TEMPLATE---\n(新 minutes template)\n---STRATEGY---\n(策略 JSON)\n---END---
+"""
+        try:
+            response = requests.post(
+                "http://localhost:11434/api/generate",
+                json={
+                    "model": "gemma3:12b",
+                    "prompt": prompt,
+                    "stream": False
+                },
+                timeout=300
+            )
+            if response.status_code == 200:
+                result = response.json()
+                content = result.get("response", "")
+                # 解析 LLM 回傳格式
+                template = None
+                strategy = None
+                if "---TEMPLATE---" in content and "---STRATEGY---" in content:
+                    t1 = content.find("---TEMPLATE---") + len("---TEMPLATE---")
+                    t2 = content.find("---STRATEGY---")
+                    s1 = t2 + len("---STRATEGY---")
+                    s2 = content.find("---END---") if "---END---" in content else len(content)
+                    template = content[t1:t2].strip()
+                    strategy_str = content[s1:s2].strip()
+                    try:
+                        import json as _json
+                        strategy = _json.loads(strategy_str)
+                    except Exception:
+                        strategy = {}
+                return template, strategy
+            else:
+                self.logger.error(f"Gemma3:12B API 回應失敗: {response.status_code} {response.text}")
+        except Exception as e:
+            self.logger.error(f"呼叫 Gemma3:12B refine template/strategy 失敗: {str(e)}")
+        return None, None
+
+def process_transcript(
+    optimizer: 'MeetingOptimizer',
+    transcript_path: Path,
+    reference_dir: Optional[Path] = None,
+    max_iterations: int = 2,
+    batch_size: int = 3,
+    **kwargs
+):
+    """
+    處理單一逐字稿，尋找對應 reference，並進行 minutes 優化
+    """
+    if reference_dir is None:
+        reference_dir = transcript_path.parent.parent / "reference"
+    transcript_file = transcript_path.name
+    with open(transcript_path, "r", encoding="utf-8") as f:
+        transcript = f.read()
+
+    # 嘗試自動尋找 reference 檔案
+    base_name = Path(transcript_file).stem
+    possible_exts = [".txt", ".md", ".json"]
+    ref_file = None
+    for ext in possible_exts:
+        candidate = reference_dir / (base_name + ext)
+        if candidate.exists():
+            ref_file = candidate
+            break
+
+    if not ref_file:
+        print(f"[警告] 找不到對應的 reference 檔案於 {reference_dir}，將僅以逐字稿產生 minutes。")
+        reference = transcript  # 直接用逐字稿作為 reference，允許產生 minutes
+    else:
+        with open(ref_file, "r", encoding="utf-8") as f:
+            reference = f.read()
+
+    matched_data = [{
+        "transcript": transcript,
+        "transcript_file": transcript_file,
+        "reference": reference,
+        "reference_file": str(ref_file) if ref_file else ""
+    }]
+
+    # 呼叫 optimize
+    optimizer.optimize(
+        matched_data,
+        max_iterations=max_iterations,
+        batch_size=batch_size
+    )

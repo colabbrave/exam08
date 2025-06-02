@@ -26,6 +26,7 @@ if project_root not in sys.path:
 from scripts.evaluation.evaluator import MeetingEvaluator
 from scripts.evaluation.config import EvaluationConfig
 from scripts.evaluation.stability_metrics import StabilityMetrics
+from scripts.evaluation.taiwan_meeting_evaluator import TaiwanMeetingEvaluator
 
 # 定義優化策略類型
 OptimizationStrategy = Callable[[str, Dict[str, Any]], str]
@@ -93,7 +94,8 @@ class StabilityOptimizer:
         self.output_dir = Path(output_dir)
         self.stability_threshold = stability_threshold
         self.quality_threshold = quality_threshold
-        self.max_iterations = max_iterations
+        # 強制只跑 1 次迭代（debug/tracing 用）
+        self.max_iterations = 1
         self.batch_size = batch_size
         self.warmup_iterations = warmup_iterations
         self.early_stopping_rounds = early_stopping_rounds
@@ -110,6 +112,7 @@ class StabilityOptimizer:
         
         # 初始化評估器和穩定性指標
         self.evaluator = MeetingEvaluator()
+        self.taiwan_evaluator = TaiwanMeetingEvaluator()
         self.stability_metrics = StabilityMetrics()
         
         # 優化歷史記錄
@@ -362,7 +365,7 @@ class StabilityOptimizer:
         if meeting_metrics.get('has_agenda', 0) < 0.5:
             suggestions.append("添加會議議程部分，列出：\n  - 討論主題\n  - 每個主題的預計時間\n  - 負責人或報告人")
         
-        # 決議事項
+        # 決议事项
         if meeting_metrics.get('has_decisions', 0) < 0.5:
             suggestions.append("添加'決議事項'部分，明確記錄：\n  - 每項決議的具體內容\n  - 表決結果（如適用）\n  - 相關背景或討論要點")
         
@@ -543,33 +546,37 @@ class StabilityOptimizer:
             # 主優化循環
             for i in range(max_iter):
                 self.logger.info(f"\n--- 迭代 {i+1}/{max_iter} ---")
-                
+                self.logger.info(f"本輪模板內容：\n{template}\n")
                 # 生成候選結果
                 self.logger.info("生成候選結果...")
                 candidates = self._generate_candidates(template, reference_texts)
-                
                 if not candidates:
                     self.logger.warning("未生成候選結果，跳過本輪迭代")
                     continue
-                
                 # 評估穩定性
                 self.logger.info("評估穩定性...")
                 stability_metrics = self._evaluate_stability(candidates)
-                
                 # 評估質量（使用第一個參考文本）
                 self.logger.info("評估質量...")
                 quality_metrics = self._evaluate_quality(
                     candidates[0], 
                     reference_texts[0] if reference_texts else ""
                 )
-                
-                # 計算總體分數（這裡可以根據需要調整權重）
-                stability_score = stability_metrics.get("overall_stability", 0.0)
-                quality_score = quality_metrics.get("combined_score", 0.0)
+                # 新增：評估會議特有細項指標
+                meeting_metrics = self._evaluate_meeting_specific_quality(candidates[0])
+                # 合併所有 metrics
+                metrics = {
+                    "stability_score": stability_metrics.get("overall_stability", 0.0),
+                    "quality_score": quality_metrics.get("combined_score", 0.0),
+                }
+                metrics.update(meeting_metrics)
+                # log metrics 內容
+                self.logger.info(f"本輪 metrics: {metrics}")
+                # 計算總體分數
+                stability_score = metrics["stability_score"]
+                quality_score = metrics["quality_score"]
                 overall_score = (stability_score * 0.6) + (quality_score * 0.4)
-                
                 self.logger.info(f"穩定性分數: {stability_score:.4f}, 質量分數: {quality_score:.4f}, 總體分數: {overall_score:.4f}")
-                
                 # 保存結果
                 result = OptimizationResult(
                     iteration=i,
@@ -577,30 +584,22 @@ class StabilityOptimizer:
                     stability_score=stability_score,
                     quality_score=quality_score,
                     overall_score=overall_score,
-                    metrics={"stability": stability_metrics, "quality": quality_metrics}
+                    metrics=metrics
                 )
-                
                 self.optimization_history.append(result)
-                
                 # 更新最佳結果
                 if self.best_result is None or overall_score > self.best_result.overall_score:
                     self.best_result = result
                     self.logger.info(f"更新最佳結果，新分數: {overall_score:.4f}")
-                
                 # 檢查是否達到閾值
                 if overall_score >= self.stability_threshold:
                     self.logger.info(f"達到穩定性閾值 {self.stability_threshold}，停止優化")
                     break
                     
-                # 選擇並應用優化策略
-                strategy = self._select_optimization_strategy({
-                    "stability_score": stability_score,
-                    "quality_score": quality_score
-                })
-                
+                # 選擇並應用優化策略（傳入完整 metrics）
+                strategy = self._select_optimization_strategy(metrics)
                 self.logger.info(f"應用優化策略: {strategy.__name__}")
-                new_template = strategy(template, {"stability": stability_metrics, "quality": quality_metrics})
-                
+                new_template = strategy(template, metrics)
                 if new_template and new_template != template:
                     template = new_template
                     self.logger.info("模板已更新")
@@ -694,17 +693,141 @@ class StabilityOptimizer:
         Returns:
             包含各項評分的字典
         """
-        if not generated or not reference:
-            self.logger.warning("生成文本或參考文本為空")
-            result = {
-                "rouge1": 0.0,
-                "rouge2": 0.0,
-                "rougeL": 0.0,
-                "bert_score_precision": 0.0,
-                "bert_score_recall": 0.0,
-                "bert_score_f1": 0.0,
-                "bleu": 0.0,
-                "combined_score": 0.0
+        if not generated:
+            self.logger.warning("生成文本為空")
+            return {
+                'rouge1': 0.0,
+                'rouge2': 0.0,
+                'rougeL': 0.0,
+                'bert_score_precision': 0.0,
+                'bert_score_recall': 0.0,
+                'bert_score_f1': 0.0,
+                'bleu': 0.0,
+                'combined_score': 0.0,
+                'taiwan_meeting_score': 0.0,
+                'structure_score': 0.0,
+                'taiwan_context_score': 0.0,
+                'action_specificity_score': 0.0,
+                'content_completeness_score': 0.0
+            }
+            
+        try:
+            self.logger.debug(f"評估質量 - 生成文本長度: {len(generated)}, 參考文本長度: {len(reference) if reference else 0}")
+            
+            # 初始化結果字典
+            result = {}
+            
+            # 計算 ROUGE 分數
+            try:
+                rouge_scores = self._calculate_rouge(generated, reference)
+                self.logger.debug(f"ROUGE 分數: {rouge_scores}")
+                result.update({
+                    "rouge1": max(0.0, min(1.0, rouge_scores.get("rouge1", 0))),
+                    "rouge2": max(0.0, min(1.0, rouge_scores.get("rouge2", 0))),
+                    "rougeL": max(0.0, min(1.0, rouge_scores.get("rougeL", 0)))
+                })
+            except Exception as e:
+                self.logger.warning(f"計算 ROUGE 分數時出錯: {str(e)}")
+                result.update({"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0})
+            
+            # 計算 BERTScore
+            try:
+                bert_scores = self._calculate_bert_score(generated, reference)
+                self.logger.debug(f"BERTScore: {bert_scores}")
+                result.update({
+                    "bert_score_precision": max(0.0, min(1.0, bert_scores.get("precision", 0))),
+                    "bert_score_recall": max(0.0, min(1.0, bert_scores.get("recall", 0))),
+                    "bert_score_f1": max(0.0, min(1.0, bert_scores.get("f1", 0)))
+                })
+            except Exception as e:
+                self.logger.warning(f"計算 BERTScore 時出錯: {str(e)}")
+                result.update({"bert_score_precision": 0.0, "bert_score_recall": 0.0, "bert_score_f1": 0.0})
+            
+            # 計算 BLEU 分數
+            try:
+                bleu_score = self._calculate_bleu(generated, reference)
+                self.logger.debug(f"BLEU 分數: {bleu_score}")
+                result["bleu"] = max(0.0, min(1.0, bleu_score))
+            except Exception as e:
+                self.logger.warning(f"計算 BLEU 分數時出錯: {str(e)}")
+                result["bleu"] = 0.0
+                
+            # 使用台灣會議記錄評估器進行評估
+            try:
+                self.logger.info("正在使用台灣會議記錄評估器進行評估...")
+                taiwan_scores = self.taiwan_evaluator.evaluate(reference, generated)
+                self.logger.debug(f"台灣會議記錄評估原始分數: {taiwan_scores}")
+                
+                # 提取主要分數，確保所有分數都在 0-1 範圍內
+                taiwan_meeting_score = max(0.0, min(1.0, taiwan_scores.get('taiwan_meeting_score', 0.0)))
+                structure_score = max(0.0, min(1.0, taiwan_scores.get('structure_score', 0.0)))
+                taiwan_context_score = max(0.0, min(1.0, taiwan_scores.get('taiwan_context_score', 0.0)))
+                action_specificity_score = max(0.0, min(1.0, taiwan_scores.get('action_specificity_score', 0.0)))
+                
+                # 計算內容完整性分數（基於其他分數的加權平均）
+                content_completeness_score = max(0.0, min(1.0, (
+                    structure_score * 0.4 +
+                    taiwan_context_score * 0.3 +
+                    action_specificity_score * 0.3
+                )))
+                
+                # 更新結果
+                result.update({
+                    'taiwan_meeting_score': taiwan_meeting_score,
+                    'structure_score': structure_score,
+                    'taiwan_context_score': taiwan_context_score,
+                    'action_specificity_score': action_specificity_score,
+                    'content_completeness_score': content_completeness_score,
+                    'detailed_scores': taiwan_scores
+                })
+                
+                # 記錄詳細評估結果
+                self.logger.info("台灣會議記錄評估結果:")
+                self.logger.info(f"  綜合分數: {taiwan_meeting_score:.4f}")
+                self.logger.info(f"  結構完整性: {structure_score:.4f}")
+                self.logger.info(f"  台灣用語適配: {taiwan_context_score:.4f}")
+                self.logger.info(f"  行動項目具體性: {action_specificity_score:.4f}")
+                self.logger.info(f"  內容完整性: {content_completeness_score:.4f}")
+                
+                # 使用台灣會議記錄分數作為主要分數
+                combined_score = taiwan_meeting_score
+                
+            except Exception as e:
+                error_msg = f"使用台灣會議記錄評估器時出錯: {str(e)}"
+                self.logger.error(error_msg, exc_info=True)
+                combined_score = result.get('bert_score_f1', 0.0)
+                result.update({
+                    'taiwan_meeting_score': combined_score,
+                    'structure_score': combined_score,
+                    'taiwan_context_score': combined_score,
+                    'action_specificity_score': combined_score,
+                    'content_completeness_score': combined_score,
+                    'error': error_msg
+                })
+            
+            # 計算綜合分數
+            result['combined_score'] = combined_score
+            
+            self.logger.debug(f"質量評估完成 - 綜合分數: {combined_score:.4f}")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"評估質量時出錯: {str(e)}", exc_info=True)
+            return {
+                'rouge1': 0.0,
+                'rouge2': 0.0,
+                'rougeL': 0.0,
+                'bert_score_precision': 0.0,
+                'bert_score_recall': 0.0,
+                'bert_score_f1': 0.0,
+                'bleu': 0.0,
+                'combined_score': 0.0,
+                'taiwan_meeting_score': 0.0,
+                'structure_score': 0.0,
+                'taiwan_context_score': 0.0,
+                'action_specificity_score': 0.0,
+                'content_completeness_score': 0.0,
+                'error': str(e)
             }
             
         try:
@@ -797,16 +920,21 @@ class StabilityOptimizer:
             meeting_metrics = self._evaluate_meeting_specific_quality(generated)
             result.update({"meeting_" + k: v for k, v in meeting_metrics.items()})
             
-            # 計算會議特定質量分數
+            # 評估台灣會議記錄質量
+            taiwan_metrics = self.taiwan_evaluator.evaluate(reference, generated)
+            result.update({"taiwan_" + k: v for k, v in taiwan_metrics.items()})
+            
+            # 計算會議特定質量分數（結合通用指標和台灣專用指標）
             meeting_quality_score = (
-                meeting_metrics['has_meeting_info'] * 0.15 +
-                meeting_metrics['has_agenda'] * 0.15 +
-                meeting_metrics['has_decisions'] * 0.2 +
-                meeting_metrics['has_action_items'] * 0.2 +
-                meeting_metrics['has_owners'] * 0.1 +
-                meeting_metrics['has_deadlines'] * 0.1 +
-                meeting_metrics['structure_score'] * 0.05 +
-                meeting_metrics['clarity_score'] * 0.05
+                meeting_metrics.get('has_meeting_info', 0) * 0.1 +
+                meeting_metrics.get('has_agenda', 0) * 0.1 +
+                meeting_metrics.get('has_decisions', 0) * 0.15 +
+                meeting_metrics.get('has_action_items', 0) * 0.15 +
+                meeting_metrics.get('has_owners', 0) * 0.05 +
+                meeting_metrics.get('has_deadlines', 0) * 0.05 +
+                meeting_metrics.get('structure_score', 0) * 0.05 +
+                meeting_metrics.get('clarity_score', 0) * 0.05 +
+                taiwan_metrics.get('taiwan_meeting_score', 0) * 0.3
             )
             
             # 計算綜合分數（加權平均）
@@ -939,31 +1067,19 @@ class StabilityOptimizer:
     def _calculate_bleu(self, generated: str, reference: str) -> float:
         """
         計算 BLEU 分數
-        
-        Args:
-            generated: 生成的文本
-            reference: 參考文本
-            
-        Returns:
-            BLEU 分數
         """
         from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
-        
         try:
-            # 將文本分割成詞彙
-            gen_tokens = list(generated)
-            ref_tokens = list(reference)
-            
-            # 使用平滑函數處理零分情況
             smoothie = SmoothingFunction().method4
-            
-            return sentence_bleu(
-                [ref_tokens],
-                gen_tokens,
-                smoothing_function=smoothie
-            )
+            reference_tokens = [reference.split()]
+            generated_tokens = generated.split()
+            bleu = sentence_bleu(reference_tokens, generated_tokens, smoothing_function=smoothie)
+            if isinstance(bleu, float):
+                return bleu
+            else:
+                return 0.0
         except Exception as e:
-            self.logger.warning(f"計算 BLEU 分數時出錯: {str(e)}")
+            self.logger.error(f"BLEU 計算失敗: {str(e)}")
             return 0.0
     
     def _parse_gemma_feedback(self, feedback: str) -> Dict[str, float]:
@@ -995,17 +1111,27 @@ class StabilityOptimizer:
     
     def _generate_candidates(self, template: str, references: List[str]) -> List[str]:
         """
-        生成候選結果
-        
-        Args:
-            template: 提示詞模板
-            references: 參考文本列表
-            
-        Returns:
-            生成的候選文本列表
+        根據目前策略與 template 實際產生新候選內容
         """
-        # 實現生成邏輯
-        return ["Sample generated text 1", "Sample generated text 2", "Sample generated text 3"]
+        # 這裡以所有策略各產生一個候選（可依需求調整）
+        candidates = []
+        for strategy in [
+            self._strategy_improve_formatting,
+            self._strategy_add_examples,
+            self._strategy_simplify_language,
+            self._strategy_add_constraints,
+            self._strategy_enhance_structure,
+            self._strategy_improve_quality
+        ]:
+            try:
+                candidate = strategy(template, {"references": references})
+                if candidate:
+                    candidates.append(candidate)
+            except Exception as e:
+                self.logger.warning(f"策略 {strategy.__name__} 產生候選時出錯: {e}")
+        if not candidates:
+            candidates = [template]
+        return candidates
 
 
 def optimize_meeting_minutes(
@@ -1019,7 +1145,9 @@ def optimize_meeting_minutes(
     batch_size: int = 3,
     warmup_iterations: int = 2,
     early_stopping_rounds: int = 3,
-    min_improvement: float = 0.01
+    min_improvement: float = 0.01,
+    taiwan_evaluator: bool = True,
+    taiwan_evaluator_weight: float = 0.7
 ) -> Dict[str, Any]:
     """
     優化會議記錄的主函數
@@ -1119,10 +1247,10 @@ def optimize_meeting_minutes(
         results = optimizer.optimize_template(template, reference_texts)
         
         print(f"優化完成！結果已保存至 {output_dir}")
-        if hasattr(results, 'best_score'):
-            print(f"最佳分數: {results.best_score:.4f}")
-        if hasattr(results, 'best_params'):
-            print("最佳參數:", results.best_params)
+        if isinstance(results, dict) and 'best_score' in results:
+            print(f"最佳分數: {results['best_score']:.4f}")
+        if isinstance(results, dict) and 'best_params' in results:
+            print("最佳參數:", results['best_params'])
         
         return results
     except Exception as e:
@@ -1157,11 +1285,15 @@ if __name__ == "__main__":
                       help="早停輪數（默認：3）")
     parser.add_argument("--min-improvement", type=float, default=0.01,
                       help="最小改進閾值（默認：0.01）")
-    
+    parser.add_argument("--taiwan-evaluator", type=int, default=1,
+                      help="是否啟用台灣會議記錄評估器（1為啟用，0為禁用，默認：1）")
+    parser.add_argument("--taiwan-evaluator-weight", type=float, default=0.7,
+                      help="台灣評估器在綜合評分中的權重（0-1，默認：0.7）")
+
     args = parser.parse_args()
-    
+
     try:
-        optimize_meeting_minutes(
+        results = optimize_meeting_minutes(
             reference_dir=args.reference_dir,
             output_dir=args.output_dir,
             model_name=args.model,
@@ -1172,7 +1304,9 @@ if __name__ == "__main__":
             batch_size=args.batch_size,
             warmup_iterations=args.warmup_iterations,
             early_stopping_rounds=args.early_stopping_rounds,
-            min_improvement=args.min_improvement
+            min_improvement=args.min_improvement,
+            taiwan_evaluator=bool(args.taiwan_evaluator),
+            taiwan_evaluator_weight=args.taiwan_evaluator_weight
         )
     except Exception as e:
         print(f"發生錯誤: {str(e)}")

@@ -94,6 +94,10 @@ class StabilityMetrics:
         if len(texts) < 2:
             return 1.0
             
+        if not isinstance(texts, list) or not all(isinstance(t, str) for t in texts):
+            logger.error("calculate_format_consistency: texts 參數必須為 List[str]，收到: %s", type(texts))
+            raise TypeError("texts 參數必須為 List[str]，請檢查呼叫點！")
+        
         # 提取結構特徵
         features = []
         for text in texts:
@@ -115,20 +119,16 @@ class StabilityMetrics:
         
         if len(features) < 2:
             return 0.0
-            
-        # 計算相似度矩陣
         try:
-            similarity_matrix = cosine_similarity(features)
+            import numpy as np
+            features_np = np.array(features)
+            similarity_matrix = cosine_similarity(features_np)
             np.fill_diagonal(similarity_matrix, 0)  # 排除自相似
-            
-            # 計算平均相似度
             n = len(similarity_matrix)
             if n < 2:
                 return 0.0
-                
             avg_similarity = np.sum(similarity_matrix) / (n * (n - 1))
             return float(avg_similarity)
-            
         except Exception as e:
             logger.error(f"計算格式一致性時出錯: {str(e)}")
             return 0.0
@@ -276,7 +276,7 @@ class StabilityMetrics:
         vectorizer = TfidfVectorizer(ngram_range=(1, 2), stop_words='english')
         try:
             tfidf = vectorizer.fit_transform(texts)
-            similarity = (tfidf * tfidf.T).toarray()
+            similarity = (tfidf * tfidf.getH()).toarray()
             np.fill_diagonal(similarity, 0)  # 排除自相似
             n = len(similarity)
             return float(similarity.sum() / (n * (n - 1)) if n > 1 else 1.0)
@@ -295,8 +295,12 @@ class StabilityMetrics:
         Returns:
             Dict[str, float]: 包含所有穩定性指標的字典
         """
+        if not isinstance(texts, list) or not all(isinstance(t, str) for t in texts):
+            logging.getLogger(__name__).error("calculate_all_metrics: texts 參數必須為 List[str]，收到: %s", type(texts))
+            raise TypeError("texts 參數必須為 List[str]，請檢查呼叫點！")
+        instance = cls()
         return {
-            "format_consistency": cls.calculate_format_consistency(texts),
+            "format_consistency": instance.calculate_format_consistency(texts),
             "length_variation": cls.calculate_length_variation(texts),
             "key_entities_consistency": cls.calculate_key_entities_consistency(texts)
         }

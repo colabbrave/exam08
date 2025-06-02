@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 from .config import EvaluationConfig, MetricCategory, MetricConfig
 from .stability_metrics import StabilityMetrics
+import logging
 
 class MeetingEvaluator:
     """會議記錄評估器"""
@@ -130,7 +131,14 @@ class MeetingEvaluator:
         Returns:
             包含穩定性指標的字典
         """
-        return self.stability_metrics.calculate_all_metrics(texts)
+        try:
+            return self.stability_metrics.calculate_all_metrics(texts)
+        except TypeError as e:
+            logging.getLogger(__name__).error(f"evaluate_stability: 參數錯誤: {e}")
+            return {"format_consistency": 0.0, "length_variation": 1.0, "key_entities_consistency": 0.0}
+        except Exception as e:
+            logging.getLogger(__name__).error(f"evaluate_stability: 未知錯誤: {e}")
+            return {"format_consistency": 0.0, "length_variation": 1.0, "key_entities_consistency": 0.0}
     
     def evaluate_batch(self, references: Union[str, List[str]], candidates: List[str]) -> Dict[str, Any]:
         """
