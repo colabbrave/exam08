@@ -341,6 +341,64 @@ python3 scripts/evaluate.py
 - `results/optimized/第671次市政會議114年5月13日逐字稿_*` - 最新優化結果
 - `results/optimized/第672次市政會議114年5月20日逐字稿_*` - 最新優化結果
 
+### 2025-06-03 模型配置大規模測試
+
+#### 🧪 全面模型配置測試執行
+
+**測試時間範圍**：11:46-18:11 (近7小時大規模測試)
+
+**測試配置清單**：
+
+- `dual_gemma_recommended`：雙Gemma架構 - 12B參數，128K上下文
+- `hybrid_llama_gemma`：混合架構 - Llama3.1(128K) + Gemma3:12b
+- `taide_optimized_chinese`：繁中優化 - TAIDE繁體中文特優
+- `lightweight_gemma`：輕量架構 - Gemma3:4b生成 + Gemma3:12b優化
+- `current_baseline`：當前基準線 - TAIDE + Gemma3:12b
+
+#### 🎯 測試執行成果
+
+**成功完成配置**：
+
+- `dual_gemma_recommended`：完成測試，耗時 54.2分鐘
+- `current_baseline`：完成測試，耗時 37.0分鐘
+
+**遭遇超時配置**：
+
+- `hybrid_llama_gemma`：1小時超時限制
+- `taide_optimized_chinese`：1小時超時限制
+- `lightweight_gemma`：1.5小時超時限制
+
+#### 📈 最新優化成果更新
+
+**第671次會議再次優化**：
+
+- **時間戳**：17:42 最新結果生成
+- **最佳分數**：0.5119 (第8輪疊代)
+- **最佳策略組合**：A_role_definition_A1 + B_structure_B1 + C_context_C4
+- **總計耗時**：7.9分鐘 (476.8秒)
+
+**第672次會議優化完成**：
+
+- **時間戳**：14:39 完成優化
+- **最佳分數**：0.5137 (第7輪疊代)
+- **最佳策略組合**：A_facilitator_A2 + B_structure_B1 + C_summary_C1
+- **總計耗時**：17.2分鐘 (1030.4秒)
+
+#### 🔧 系統穩定性再次驗證
+
+- **模型可用性確認**：所有5種配置的模型檔案就緒
+- **指令參數最佳化**：修正 `--reference-dir` 和 `--output-dir` 等參數問題
+- **超時機制驗證**：1小時超時保護機制正常運作
+- **持續測試能力**：系統展現長時間穩定運行能力
+
+#### 📋 新增測試檔案記錄
+
+- `model_config_tests/model_config_test.log` - 完整測試執行日誌
+- `model_config_tests/model_specs_comparison_20250603_114658.json` - 模型規格比較
+- `model_config_tests/validation_results_20250603_114725.json` - 模型驗證結果
+- `results/optimized/第671次市政會議114年5月13日逐字稿_*` (更新) - 17:42最新優化結果
+- `results/optimized/第672次市政會議114年5月20日逐字稿_*` (更新) - 14:39優化結果
+
 ## 系統異動總結
 
 ### 🏆 重大里程碑達成
