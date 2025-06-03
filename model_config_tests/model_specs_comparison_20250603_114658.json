@@ -1,0 +1,231 @@
+{
+  "report_timestamp": "2025-06-03T11:46:58.731282",
+  "model_specifications": {
+    "dual_gemma_recommended": {
+      "configuration_name": "dual_gemma_recommended",
+      "generation_model": "gemma3:12b",
+      "optimization_model": "gemma3:12b",
+      "embedding_model": "nomic-embed-text:latest",
+      "description": "雙Gemma架構 - 12B參數，128K上下文，統一強推理能力，量化感知訓練",
+      "expected_improvements": {
+        "quality_improvement": 0.15,
+        "stability_sigma": 0.05,
+        "avg_iterations": 25,
+        "processing_time": 120,
+        "context_length": 128000,
+        "model_rating": 5,
+        "technical_advantages": [
+          "強推理能力",
+          "長上下文",
+          "記憶體效率",
+          "多模態支持"
+        ]
+      },
+      "model_rating": 5,
+      "context_length": 128000,
+      "technical_advantages": [
+        "強推理能力",
+        "長上下文",
+        "記憶體效率",
+        "多模態支持"
+      ]
+    },
+    "hybrid_llama_gemma": {
+      "configuration_name": "hybrid_llama_gemma",
+      "generation_model": "llama3.1:8b",
+      "optimization_model": "gemma3:12b",
+      "embedding_model": "nomic-embed-text:latest",
+      "description": "混合架構 - Llama3.1(128K上下文+工具使用) + Gemma3:12b(強推理)",
+      "expected_improvements": {
+        "quality_improvement": 0.12,
+        "stability_sigma": 0.08,
+        "avg_iterations": 30,
+        "processing_time": 135,
+        "context_length": 128000,
+        "model_rating": 4,
+        "technical_advantages": [
+          "超長上下文",
+          "工具使用能力",
+          "多語言支持",
+          "強推理優化"
+        ]
+      },
+      "model_rating": 4,
+      "context_length": 128000,
+      "technical_advantages": [
+        "超長上下文",
+        "工具使用能力",
+        "多語言支持",
+        "強推理優化"
+      ]
+    },
+    "taide_optimized_chinese": {
+      "configuration_name": "taide_optimized_chinese",
+      "generation_model": "cwchang/llama3-taide-lx-8b-chat-alpha1:latest",
+      "optimization_model": "gemma3:12b",
+      "embedding_model": "nomic-embed-text:latest",
+      "description": "繁中優化架構 - TAIDE繁體中文特優 + Gemma3:12b推理 + 升級embedding",
+      "expected_improvements": {
+        "quality_improvement": 0.08,
+        "stability_sigma": 0.12,
+        "avg_iterations": 35,
+        "processing_time": 140,
+        "context_length": 8192,
+        "model_rating": 4,
+        "technical_advantages": [
+          "繁體中文特優",
+          "中翻英優異",
+          "最小變更風險",
+          "穩定基礎"
+        ]
+      },
+      "model_rating": 4,
+      "context_length": 8192,
+      "technical_advantages": [
+        "繁體中文特優",
+        "中翻英優異",
+        "最小變更風險",
+        "穩定基礎"
+      ]
+    },
+    "lightweight_gemma": {
+      "configuration_name": "lightweight_gemma",
+      "generation_model": "gemma3:4b",
+      "optimization_model": "gemma3:12b",
+      "embedding_model": "nomic-embed-text:latest",
+      "description": "輕量架構 - Gemma3:4b生成 + Gemma3:12b優化，資源效率高",
+      "expected_improvements": {
+        "quality_improvement": 0.06,
+        "stability_sigma": 0.1,
+        "avg_iterations": 40,
+        "processing_time": 100,
+        "context_length": 128000,
+        "model_rating": 3,
+        "technical_advantages": [
+          "輕量設計",
+          "資源效率",
+          "快速處理",
+          "128K上下文"
+        ]
+      },
+      "model_rating": 3,
+      "context_length": 128000,
+      "technical_advantages": [
+        "輕量設計",
+        "資源效率",
+        "快速處理",
+        "128K上下文"
+      ]
+    },
+    "current_baseline": {
+      "configuration_name": "current_baseline",
+      "generation_model": "cwchang/llama3-taide-lx-8b-chat-alpha1:latest",
+      "optimization_model": "gemma3:12b",
+      "embedding_model": "current",
+      "description": "當前系統配置 - 基準線測試（TAIDE + Gemma3:12b + 舊embedding）",
+      "expected_improvements": {
+        "quality_improvement": 0.0,
+        "stability_sigma": 0.2078,
+        "avg_iterations": 63,
+        "processing_time": 145.8,
+        "context_length": 8192,
+        "model_rating": 3,
+        "technical_advantages": [
+          "已驗證穩定",
+          "繁體中文優勢",
+          "現有配置"
+        ]
+      },
+      "model_rating": 3,
+      "context_length": 8192,
+      "technical_advantages": [
+        "已驗證穩定",
+        "繁體中文優勢",
+        "現有配置"
+      ]
+    }
+  },
+  "ranking_analysis": {
+    "by_quality_improvement": [
+      {
+        "rank": 1,
+        "config_name": "dual_gemma_recommended",
+        "expected_improvement": 0.15,
+        "rating": 5
+      },
+      {
+        "rank": 2,
+        "config_name": "hybrid_llama_gemma",
+        "expected_improvement": 0.12,
+        "rating": 4
+      },
+      {
+        "rank": 3,
+        "config_name": "taide_optimized_chinese",
+        "expected_improvement": 0.08,
+        "rating": 4
+      },
+      {
+        "rank": 4,
+        "config_name": "lightweight_gemma",
+        "expected_improvement": 0.06,
+        "rating": 3
+      },
+      {
+        "rank": 5,
+        "config_name": "current_baseline",
+        "expected_improvement": 0.0,
+        "rating": 3
+      }
+    ],
+    "by_stability": [
+      {
+        "config_name": "dual_gemma_recommended",
+        "expected_sigma": 0.05,
+        "stability_score": 16.666666666666664
+      },
+      {
+        "config_name": "hybrid_llama_gemma",
+        "expected_sigma": 0.08,
+        "stability_score": 11.11111111111111
+      },
+      {
+        "config_name": "lightweight_gemma",
+        "expected_sigma": 0.1,
+        "stability_score": 9.090909090909092
+      },
+      {
+        "config_name": "taide_optimized_chinese",
+        "expected_sigma": 0.12,
+        "stability_score": 7.692307692307692
+      },
+      {
+        "config_name": "current_baseline",
+        "expected_sigma": 0.2078,
+        "stability_score": 4.591368227731864
+      }
+    ]
+  },
+  "recommendations": {
+    "top_recommendation": "dual_gemma_recommended",
+    "reasoning": "基於模型規格分析，dual_gemma_recommended具有最高的品質改善潛力",
+    "implementation_priority": [
+      "立即測試: dual_gemma_recommended",
+      "次要選擇: hybrid_llama_gemma",
+      "備用方案: taide_optimized_chinese"
+    ],
+    "risk_assessment": {
+      "high_performance": [
+        "dual_gemma_recommended"
+      ],
+      "moderate_risk": [
+        "hybrid_llama_gemma",
+        "taide_optimized_chinese"
+      ],
+      "conservative_choice": [
+        "lightweight_gemma",
+        "current_baseline"
+      ]
+    }
+  }
+}

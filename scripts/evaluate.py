@@ -92,12 +92,29 @@ def calculate_bertscore(predictions: List[str], references: List[str]) -> Dict[s
         global _bert_offline_scorer
         if '_bert_offline_scorer' not in globals():
             _bert_offline_scorer = BERTScorer(lang="zh", rescale_with_baseline=True, device="cpu")
-        P, R, F1 = _bert_offline_scorer.score(predictions, references)
-        return {
-            "bertscore_precision": float(P.mean().item()),
-            "bertscore_recall": float(R.mean().item()),
-            "bertscore_f1": float(F1.mean().item())
-        }
+        
+        scores = _bert_offline_scorer.score(predictions, references)
+        
+        # 檢查返回值類型並處理
+        if isinstance(scores, tuple) and len(scores) == 3:
+            P, R, F1 = scores
+            # 確保 P, R, F1 有 mean 方法（應該是 tensors）
+            if hasattr(P, 'mean') and hasattr(R, 'mean') and hasattr(F1, 'mean'):
+                return {
+                    "bertscore_precision": float(P.mean().item()),
+                    "bertscore_recall": float(R.mean().item()),
+                    "bertscore_f1": float(F1.mean().item())
+                }
+            else:
+                # 如果不是 tensor，嘗試直接轉換
+                return {
+                    "bertscore_precision": float(P) if isinstance(P, (int, float)) else 0.0,
+                    "bertscore_recall": float(R) if isinstance(R, (int, float)) else 0.0,
+                    "bertscore_f1": float(F1) if isinstance(F1, (int, float)) else 0.0
+                }
+        else:
+            # 如果返回格式不是預期的tuple，使用默認值
+            return {"bertscore_precision": 0.0, "bertscore_recall": 0.0, "bertscore_f1": 0.0}
     except Exception as e:
         print(f"BERTScore 離線計算錯誤: {str(e)}")
         return {"bertscore_precision": 0.0, "bertscore_recall": 0.0, "bertscore_f1": 0.0}
@@ -145,16 +162,14 @@ def evaluate_with_metrics(pred_text: str, ref_text: str, use_legacy: bool = Fals
         包含所有評估指標的字典
     """
     if not pred_text or not ref_text:
-        error_msg = "錯誤：評估文本或參考文本為空"
         if verbose:
-            print(error_msg)
+            print("錯誤：評估文本或參考文本為空")
         return {
             'overall_score': 0.0,
             'semantic_similarity': 0.0,
             'content_coverage': 0.0,
             'structure_quality': 0.0,
-            'weighted_score': 0.0,
-            'error': error_msg
+            'weighted_score': 0.0
         }
     
     if use_legacy:
@@ -187,16 +202,14 @@ def evaluate_with_metrics(pred_text: str, ref_text: str, use_legacy: bool = Fals
             return metrics
             
         except Exception as e:
-            error_msg = f"舊版評估出錯: {str(e)}"
             if verbose:
-                print(error_msg)
+                print(f"舊版評估出錯: {str(e)}")
             return {
                 'overall_score': 0.0,
                 'semantic_similarity': 0.0,
                 'content_coverage': 0.0,
                 'structure_quality': 0.0,
-                'weighted_score': 0.0,
-                'error': error_msg
+                'weighted_score': 0.0
             }
     else:
         # 使用新版多指標評估系統
@@ -207,16 +220,14 @@ def evaluate_with_metrics(pred_text: str, ref_text: str, use_legacy: bool = Fals
             result = evaluator.evaluate(ref_text, pred_text)
             
             if not result or 'scores' not in result:
-                error_msg = "評估結果格式不正確"
                 if verbose:
-                    print(error_msg)
+                    print("評估結果格式不正確")
                 return {
                     'overall_score': 0.0,
                     'semantic_similarity': 0.0,
                     'content_coverage': 0.0,
                     'structure_quality': 0.0,
-                    'weighted_score': 0.0,
-                    'error': error_msg
+                    'weighted_score': 0.0
                 }
             
             # 將結果轉換為與舊版兼容的格式
@@ -253,9 +264,8 @@ def evaluate_with_metrics(pred_text: str, ref_text: str, use_legacy: bool = Fals
             return metrics
             
         except Exception as e:
-            error_msg = f"評估時發生錯誤: {str(e)}"
             if verbose:
-                print(error_msg)
+                print(f"評估時發生錯誤: {str(e)}")
                 import traceback
                 traceback.print_exc()
                 
@@ -264,8 +274,7 @@ def evaluate_with_metrics(pred_text: str, ref_text: str, use_legacy: bool = Fals
                 'semantic_similarity': 0.0,
                 'content_coverage': 0.0,
                 'structure_quality': 0.0,
-                'weighted_score': 0.0,
-                'error': error_msg
+                'weighted_score': 0.0
             }
 
 def evaluate_texts(pred_text: str, ref_text: str, use_legacy: bool = False) -> Dict[str, float]:
@@ -443,8 +452,8 @@ def main():
                 else:
                     print(f"{metric_name}: 無有效數值")
     
-    print_metrics(model_metrics, "模型評估結果")
-    print_metrics(strategy_metrics, "策略評估結果")
+    print_metrics(dict(model_metrics), "模型評估結果")
+    print_metrics(dict(strategy_metrics), "策略評估結果")
     
     detailed_results = {}
     for base_name, models in results.items():

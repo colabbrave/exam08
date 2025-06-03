@@ -1,0 +1,55 @@
+{
+  "dual_gemma_recommended": {
+    "config_name": "dual_gemma_recommended",
+    "timestamp": "2025-06-03T11:47:24.963437",
+    "model_availability": {
+      "gemma3:12b": true,
+      "nomic-embed-text:latest": true
+    },
+    "basic_functionality": {},
+    "validation_status": "models_ready"
+  },
+  "hybrid_llama_gemma": {
+    "config_name": "hybrid_llama_gemma",
+    "timestamp": "2025-06-03T11:47:25.045666",
+    "model_availability": {
+      "llama3.1:8b": true,
+      "gemma3:12b": true,
+      "nomic-embed-text:latest": true
+    },
+    "basic_functionality": {},
+    "validation_status": "models_ready"
+  },
+  "taide_optimized_chinese": {
+    "config_name": "taide_optimized_chinese",
+    "timestamp": "2025-06-03T11:47:25.083752",
+    "model_availability": {
+      "cwchang/llama3-taide-lx-8b-chat-alpha1:latest": true,
+      "gemma3:12b": true,
+      "nomic-embed-text:latest": true
+    },
+    "basic_functionality": {},
+    "validation_status": "models_ready"
+  },
+  "lightweight_gemma": {
+    "config_name": "lightweight_gemma",
+    "timestamp": "2025-06-03T11:47:25.118447",
+    "model_availability": {
+      "gemma3:4b": true,
+      "gemma3:12b": true,
+      "nomic-embed-text:latest": true
+    },
+    "basic_functionality": {},
+    "validation_status": "models_ready"
+  },
+  "current_baseline": {
+    "config_name": "current_baseline",
+    "timestamp": "2025-06-03T11:47:25.154778",
+    "model_availability": {
+      "cwchang/llama3-taide-lx-8b-chat-alpha1:latest": true,
+      "gemma3:12b": true
+    },
+    "basic_functionality": {},
+    "validation_status": "models_ready"
+  }
+}
