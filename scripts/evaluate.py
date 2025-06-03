@@ -21,9 +21,8 @@ except ImportError as e:
     print(f"警告: 無法載入多指標評估模組: {str(e)}")
     print("將使用舊版評估方法。請確保已安裝所有依賴項。")
     EVALUATOR_AVAILABLE = False
-
-# 導入新的評估模組
-from evaluation import MeetingEvaluator, EvaluationConfig
+    MeetingEvaluator = None
+    EvaluationConfig = None
 
 def parse_arguments():
     """Parse command line arguments"""
@@ -53,7 +52,7 @@ except ImportError:
 
 # 初始化新的評估器
 evaluator = None
-if EVALUATOR_AVAILABLE:
+if EVALUATOR_AVAILABLE and MeetingEvaluator is not None:
     try:
         evaluator = MeetingEvaluator()
         print("已載入多指標評估系統")
@@ -87,6 +86,7 @@ def calculate_bertscore(predictions: List[str], references: List[str]) -> Dict[s
     except ImportError:
         print("警告: bert-score 未安裝，跳過 BERTScore 計算")
         return {"bertscore_precision": 0.0, "bertscore_recall": 0.0, "bertscore_f1": 0.0}
+    
     try:
         # 使用全局 scorer 實例，確保模型只下載一次並離線快取
         global _bert_offline_scorer
@@ -95,26 +95,41 @@ def calculate_bertscore(predictions: List[str], references: List[str]) -> Dict[s
         
         scores = _bert_offline_scorer.score(predictions, references)
         
+        # 安全地處理返回值，避免類型檢查錯誤
+        def safe_extract_score(score_value):
+            """安全地從各種格式中提取數值分數"""
+            try:
+                # 如果是 tensor 且有 mean 方法
+                if hasattr(score_value, 'mean'):
+                    mean_val = score_value.mean()
+                    # 如果有 item 方法（PyTorch tensor）
+                    if hasattr(mean_val, 'item'):
+                        return float(mean_val.item())
+                    else:
+                        return float(mean_val)
+                # 如果是數字
+                elif isinstance(score_value, (int, float)):
+                    return float(score_value)
+                # 如果是列表或數組，取第一個元素
+                elif hasattr(score_value, '__getitem__') and len(score_value) > 0:
+                    return float(score_value[0])
+                else:
+                    return 0.0
+            except Exception:
+                return 0.0
+        
         # 檢查返回值類型並處理
         if isinstance(scores, tuple) and len(scores) == 3:
             P, R, F1 = scores
-            # 確保 P, R, F1 有 mean 方法（應該是 tensors）
-            if hasattr(P, 'mean') and hasattr(R, 'mean') and hasattr(F1, 'mean'):
-                return {
-                    "bertscore_precision": float(P.mean().item()),
-                    "bertscore_recall": float(R.mean().item()),
-                    "bertscore_f1": float(F1.mean().item())
-                }
-            else:
-                # 如果不是 tensor，嘗試直接轉換
-                return {
-                    "bertscore_precision": float(P) if isinstance(P, (int, float)) else 0.0,
-                    "bertscore_recall": float(R) if isinstance(R, (int, float)) else 0.0,
-                    "bertscore_f1": float(F1) if isinstance(F1, (int, float)) else 0.0
-                }
+            return {
+                "bertscore_precision": safe_extract_score(P),
+                "bertscore_recall": safe_extract_score(R),
+                "bertscore_f1": safe_extract_score(F1)
+            }
         else:
             # 如果返回格式不是預期的tuple，使用默認值
             return {"bertscore_precision": 0.0, "bertscore_recall": 0.0, "bertscore_f1": 0.0}
+            
     except Exception as e:
         print(f"BERTScore 離線計算錯誤: {str(e)}")
         return {"bertscore_precision": 0.0, "bertscore_recall": 0.0, "bertscore_f1": 0.0}
@@ -215,6 +230,12 @@ def evaluate_with_metrics(pred_text: str, ref_text: str, use_legacy: bool = Fals
         # 使用新版多指標評估系統
         if verbose:
             print("使用新版多指標評估系統...")
+        
+        # 檢查 evaluator 是否可用
+        if evaluator is None:
+            if verbose:
+                print("評估器未初始化，回退到舊版方法")
+            return evaluate_with_metrics(pred_text, ref_text, use_legacy=True, verbose=verbose)
             
         try:
             result = evaluator.evaluate(ref_text, pred_text)
@@ -239,43 +260,11 @@ def evaluate_with_metrics(pred_text: str, ref_text: str, use_legacy: bool = Fals
                 'weighted_score': float(result.get('overall_score', 0.0)),
                 'details': result.get('details', {})
             }
-            
-            # 添加詳細指標
-            if 'semantic_similarity' in result.get('scores', {}):
-                sem = result['scores']['semantic_similarity']
-                metrics.update({
-                    'bertscore_f1': float(sem.get('bertscore_f1', 0.0))
-                })
-                
-            if 'content_coverage' in result.get('scores', {}):
-                cov = result['scores']['content_coverage']
-                metrics.update({
-                    'rouge_rouge1': float(cov.get('rouge1', 0.0)),
-                    'rouge_rouge2': float(cov.get('rouge2', 0.0)),
-                    'rouge_rougeL': float(cov.get('rougeL', 0.0))
-                })
-                
-            if verbose:
-                print(f"評估完成 - 總分: {metrics['overall_score']:.4f}")
-                print(f"語義相似度: {metrics['semantic_similarity']:.4f}")
-                print(f"內容覆蓋度: {metrics['content_coverage']:.4f}")
-                print(f"結構質量: {metrics['structure_quality']:.4f}")
-                
             return metrics
-            
         except Exception as e:
             if verbose:
-                print(f"評估時發生錯誤: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                
-            return {
-                'overall_score': 0.0,
-                'semantic_similarity': 0.0,
-                'content_coverage': 0.0,
-                'structure_quality': 0.0,
-                'weighted_score': 0.0
-            }
+                print(f"新版多指標評估系統出錯: {str(e)}，回退到舊版方法")
+            return evaluate_with_metrics(pred_text, ref_text, use_legacy=True, verbose=verbose)
 
 def evaluate_texts(pred_text: str, ref_text: str, use_legacy: bool = False) -> Dict[str, float]:
     """
