@@ -81,26 +81,25 @@ def load_text(filepath):
         return f.read().strip()
 
 def calculate_bertscore(predictions: List[str], references: List[str]) -> Dict[str, float]:
-    """舊版 BERTScore 計算（兼容用）"""
-    if bert_score is None:
+    """離線 BERTScore 計算，使用本地快取模型"""
+    try:
+        from bert_score import BERTScorer
+    except ImportError:
         print("警告: bert-score 未安裝，跳過 BERTScore 計算")
         return {"bertscore_precision": 0.0, "bertscore_recall": 0.0, "bertscore_f1": 0.0}
-    
     try:
-        P, R, F1 = bert_score(
-            predictions,
-            references,
-            lang="zh",
-            verbose=True,
-            device="cuda" if torch.cuda.is_available() else "cpu"
-        )
+        # 使用全局 scorer 實例，確保模型只下載一次並離線快取
+        global _bert_offline_scorer
+        if '_bert_offline_scorer' not in globals():
+            _bert_offline_scorer = BERTScorer(lang="zh", rescale_with_baseline=True, device="cpu")
+        P, R, F1 = _bert_offline_scorer.score(predictions, references)
         return {
             "bertscore_precision": float(P.mean().item()),
             "bertscore_recall": float(R.mean().item()),
             "bertscore_f1": float(F1.mean().item())
         }
     except Exception as e:
-        print(f"BERTScore 計算錯誤: {str(e)}")
+        print(f"BERTScore 離線計算錯誤: {str(e)}")
         return {"bertscore_precision": 0.0, "bertscore_recall": 0.0, "bertscore_f1": 0.0}
 
 def calculate_rouge(predictions: List[str], references: List[str]) -> Dict[str, float]:

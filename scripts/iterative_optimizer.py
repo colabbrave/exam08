@@ -44,6 +44,7 @@ class OptimizationConfig:
     max_iterations: int = 5
     quality_threshold: float = 0.8
     min_improvement: float = 0.02
+    patience: int = 3  # early stopping 耐心次數
     strategy_max_count: int = 3
     model_name: str = "cwchang/llama3-taide-lx-8b-chat-alpha1:latest"
     optimization_model: str = "gemma3:12b"
@@ -246,7 +247,7 @@ class MeetingOptimizer:
                 return None
             
             # 如果有多個同維度策略，選擇「較弱」的進行替換
-            # 這裡簡化為選擇第一個同維度策略進行替換
+            # 這裡簡化為選擇第一個同維度策略進行替换
             strategy_to_replace = same_dimension_strategies[0]
             
             # 執行替換
@@ -410,7 +411,7 @@ class MeetingOptimizer:
     "dimension_focus": "角色|結構|內容|格式|語言|品質",
     "rationale": "調整理由說明"
   }},
-  "specific_improvements": {{
+  "specific_im
     "content_structure": "具體的內容結構改進建議",
     "language_style": "語言風格調整方向",
     "format_enhancement": "格式改進要點"
@@ -749,12 +750,14 @@ class MeetingOptimizer:
         if latest.scores.get('overall_score', 0) >= self.config.quality_threshold:
             return True, f"達到品質閾值 {self.config.quality_threshold}"
         
-        # 檢查是否連續無改善
-        if len(history) >= 3:
-            recent_scores = [r.scores.get('overall_score', 0) for r in history[-3:]]
-            if all(abs(recent_scores[i] - recent_scores[i-1]) < self.config.min_improvement 
-                   for i in range(1, len(recent_scores))):
-                return True, "連續三輪無顯著改善"
+        # 檢查是否連續無改善 (使用 patience 和 min_improvement)
+        patience = self.config.patience
+        # 需要至少 patience+1 次歷史記錄以比較差異
+        if len(history) >= patience + 1:
+            recent_scores = [r.scores.get('overall_score', 0) for r in history[-(patience+1):]]
+            # 比較每輪分數差異
+            if all(abs(recent_scores[i] - recent_scores[i-1]) < self.config.min_improvement for i in range(1, len(recent_scores))):
+                return True, f"連續{patience}輪無顯著改善"
         
         return False, ""
     
@@ -850,7 +853,7 @@ class MeetingOptimizer:
             improvements = None
             if iteration > 0 and history:
                 try:
-                    # 構建歷史數據用於改進建議
+                    # 構建歷史数據用於改進建議
                     history_dict = {"iterations": [asdict(result) for result in history]}
                     improvements = self._get_strategy_improvements(transcript, history_dict, reference)
                     
@@ -997,13 +1000,22 @@ class MeetingOptimizer:
                 parsed = json.loads(json_str)
                 return parsed
             else:
-                # 嘗試直接解析整個文本
-                parsed = json.loads(improvement_text.strip())
-                return parsed
-        except (json.JSONDecodeError, AttributeError) as e:
-            self.logger.warning(f"無法解析改進建議JSON: {e}")
-            # 降級為文本解析
-            return self._fallback_parse_improvements(improvement_text)
+                # 嘗試直接解析文本中的大括號範圍
+                try:
+                    start = improvement_text.find('{')
+                    end = improvement_text.rfind('}')
+                    if start != -1 and end != -1 and end > start:
+                        json_str = improvement_text[start:end+1]
+                        parsed = json.loads(json_str)
+                        return parsed
+                    else:
+                        raise ValueError("無法提取JSON區塊")
+                except Exception as ex:
+                    self.logger.warning(f"解析改進建議JSON失敗: {ex}")
+                    return {}
+        except Exception as e:
+            self.logger.warning(f"解析改進建議失敗: {e}")
+            return {}
     
     def _fallback_parse_improvements(self, text: str) -> Dict[str, Any]:
         """降級文本解析改進建議"""
