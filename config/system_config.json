@@ -2,7 +2,7 @@
   "system_config": {
     "virtual_env_path": ".venv",
     "default_models": {
-      "target": "gemma2:9b",
+      "target": "gemma3:12b",
       "optimizer": "gemma3:12b",
       "fallback_target": "llama3.1:8b",
       "fallback_optimizer": "gemma3:4b"

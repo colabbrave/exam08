@@ -40,17 +40,17 @@ class MetricCategory:
             "metrics": {k: v.to_dict() for k, v in self.metrics.items()}
         }
     
-    def add_metric(self, metric: MetricConfig):
+    def add_metric(self, metric: MetricConfig) -> None:
         self.metrics[metric.name] = metric
 
 class EvaluationConfig:
     """評估系統配置"""
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.categories: Dict[str, MetricCategory] = {}
         self._initialize_default_config()
     
-    def _initialize_default_config(self):
+    def _initialize_default_config(self) -> None:
         """初始化默認配置"""
         # 1. 語義相似度
         semantic = MetricCategory("semantic_similarity", weight=0.3)
@@ -119,7 +119,7 @@ class EvaluationConfig:
         ))
         self.add_category(stability)
     
-    def add_category(self, category: MetricCategory):
+    def add_category(self, category: MetricCategory) -> None:
         """添加指標類別"""
         self.categories[category.name] = category
     

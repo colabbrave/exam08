@@ -1,12 +1,8 @@
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -23,6 +19,59 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
+
+# 虛擬環境
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# 專案特定
+data/raw/*
+data/processed/*
+output/results/*
+output/logs/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!output/results/.gitkeep
+!output/logs/.gitkeep
+
+# 測試
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# 文件
+docs/_build/
+site/
+docs/api/
+
+# 其他
+*.log
+*.sqlite3
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 系統
+.DS_Store
+Thumbs.db
 
 # Virtual environments
 .venv/
@@ -114,7 +163,6 @@ dmypy.json
 .pyre/
 
 # macOS system files
-.DS_Store
 .AppleDouble
 .LSOverride
 

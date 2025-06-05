@@ -1,0 +1,13 @@
+[會議記錄]
+會議主題: {topic}
+與會人員: {participants}
+會議時間: {time}
+
+討論要點:
+{key_points}
+
+決議事項:
+{decisions}
+
+行動項目:
+{action_items}

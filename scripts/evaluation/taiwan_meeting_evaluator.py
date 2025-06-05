@@ -7,7 +7,7 @@
 3. 行動項目具體性
 """
 import re
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional, Any, Union
 import json
 from pathlib import Path
 
@@ -31,7 +31,7 @@ class TaiwanMeetingEvaluator:
         if config_path and Path(config_path).exists():
             self._load_config(config_path)
     
-    def _load_config(self, config_path: str):
+    def _load_config(self, config_path: str) -> None:
         """載入自定義配置"""
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
@@ -40,7 +40,7 @@ class TaiwanMeetingEvaluator:
         except Exception as e:
             print(f"警告：載入配置檔案失敗，使用預設配置。錯誤：{e}")
     
-    def evaluate(self, reference: str, candidate: str) -> Dict[str, float]:
+    def evaluate(self, reference: str, candidate: str) -> Dict[str, Union[float, str]]:
         """
         評估會議記錄質量
         
@@ -52,7 +52,7 @@ class TaiwanMeetingEvaluator:
             包含各項評分的字典
         """
         try:
-            scores = {}
+            scores: Dict[str, Union[float, str]] = {}
             
             # 1. 結構完整性評分 (40%)
             structure_score = self._evaluate_structure(candidate)
@@ -89,8 +89,12 @@ class TaiwanMeetingEvaluator:
                 similarity_factor = 0.8 + 0.4 * ((structure_sim + taiwan_sim) / 2.0)
                 
                 # 調整綜合分數
-                scores['taiwan_meeting_score'] = min(1.0, scores['taiwan_meeting_score'] * similarity_factor)
-                scores['similarity_to_reference'] = (structure_sim + taiwan_sim) / 2.0
+                taiwan_score_value = scores.get('taiwan_meeting_score', 0.0)
+                if isinstance(taiwan_score_value, (int, float)):
+                    scores['taiwan_meeting_score'] = min(1.0, float(taiwan_score_value) * similarity_factor)
+                else:
+                    scores['taiwan_meeting_score'] = 0.0
+                scores['similarity_to_reference'] = float((structure_sim + taiwan_sim) / 2.0)
             
             return scores
             
@@ -200,7 +204,7 @@ class TaiwanMeetingEvaluator:
             taiwan_score = sum(scores) / (len(taiwan_terms) * 1.5)  # 標準化到0-1
             
             # 計算大陸用語扣分
-            mainland_penalty = 0
+            mainland_penalty: float = 0.0
             for term in mainland_terms:
                 if term in text:
                     mainland_penalty += 0.05  # 每個大陸用語扣0.05分
@@ -290,7 +294,7 @@ class TaiwanMeetingEvaluator:
             return 0.0
 
 
-def test_evaluation_system():
+def test_evaluation_system() -> None:
     """測試評估系統是否能區分差異"""
     test_cases = [
         ("簡陋版", "今天開會討論了一些事情。"),
@@ -339,8 +343,8 @@ def test_evaluation_system():
         print(f"  綜合分數: {scores['taiwan_meeting_score']:.3f}")
     
     # 檢查分數是否遞增
-    scores = [r[1]['taiwan_meeting_score'] for r in results]
-    if scores != sorted(scores):
+    score_values = [r[1]['taiwan_meeting_score'] for r in results]
+    if score_values != sorted(score_values):
         print("\n警告：評估系統可能無法正確區分不同質量的會議記錄")
     else:
         print("\n評估系統測試通過：分數隨質量提升而增加")

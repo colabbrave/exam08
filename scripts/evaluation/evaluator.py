@@ -3,7 +3,7 @@
 
 實現多指標評估邏輯，包括穩定性評估
 """
-from typing import Dict, List, Tuple, Optional, Any, Union
+from typing import Dict, List, Tuple, Optional, Any, Union, Callable
 import json
 from pathlib import Path
 import numpy as np
@@ -17,9 +17,10 @@ class MeetingEvaluator:
     def __init__(self, config: Optional[EvaluationConfig] = None):
         self.config = config or EvaluationConfig()
         self.stability_metrics = StabilityMetrics()
+        self.metric_calculators: Dict[str, Callable[[str, str], Tuple[float, Dict[str, Any]]]] = {}
         self._initialize_metrics()
     
-    def _initialize_metrics(self):
+    def _initialize_metrics(self) -> None:
         """初始化指標計算器"""
         self.metric_calculators = {
             "bertscore_f1": self._calculate_bertscore,
@@ -58,7 +59,7 @@ class MeetingEvaluator:
                 'overall_score': float
             }
         """
-        results = {
+        results: Dict[str, Any] = {
             'categories': {},
             'overall_score': 0.0
         }
@@ -68,7 +69,7 @@ class MeetingEvaluator:
             if not category.enabled or category_name == "stability":
                 continue  # 穩定性指標在 evaluate_stability 中單獨處理
                 
-            category_result = {
+            category_result: Dict[str, Any] = {
                 'name': category.name,
                 'score': 0.0,
                 'metrics': {}
@@ -106,17 +107,16 @@ class MeetingEvaluator:
             results['categories'][category_name] = category_result
         
         # 計算總分
-        total_weight = sum(
-            cat.weight 
-            for cat in self.config.categories.values() 
+        enabled_categories = [
+            cat for cat in self.config.categories.values() 
             if cat.enabled and cat.name in results['categories']
-        )
+        ]
+        total_weight = sum(cat.weight for cat in enabled_categories)
         
         if total_weight > 0:
             results['overall_score'] = sum(
                 results['categories'][cat.name]['score'] * (cat.weight / total_weight)
-                for cat in self.config.categories.values()
-                if cat.enabled and cat.name in results['categories']
+                for cat in enabled_categories
             )
         
         return results

@@ -21,11 +21,23 @@ from datetime import datetime
 try:
     import sys
     sys.path.append(os.path.join(os.path.dirname(__file__)))
-    from evaluation import MeetingEvaluator, EvaluationConfig
+    from scripts.evaluation import MeetingEvaluator, EvaluationConfig
     EVALUATOR_AVAILABLE = True
 except ImportError:
     print("警告: 無法載入評估模組，將建立基本評估功能")
     EVALUATOR_AVAILABLE = False
+
+# 導入語意分段相關模組，優先從 project 根目錄載入
+try:
+    from optimize_meeting_minutes import MeetingOptimizer as SemanticMeetingOptimizer, OptimizationConfig as SemanticConfig
+    SEMANTIC_OPTIMIZER_AVAILABLE = True
+except ImportError:
+    try:
+        from scripts.optimize_meeting_minutes import MeetingOptimizer as SemanticMeetingOptimizer, OptimizationConfig as SemanticConfig
+        SEMANTIC_OPTIMIZER_AVAILABLE = True
+    except ImportError:
+        print("警告: 無法載入語意分段優化模組")
+        SEMANTIC_OPTIMIZER_AVAILABLE = False
 
 @dataclass
 class OptimizationResult:
@@ -50,6 +62,9 @@ class OptimizationConfig:
     optimization_model: str = "gemma3:12b"
     enable_early_stopping: bool = True
     save_all_iterations: bool = True
+    enable_semantic_segmentation: bool = False
+    semantic_model: str = "gemma3:12b"
+    max_segment_length: int = 4000
 
 class MeetingOptimizer:
     """會議記錄優化器 - 實現完整的疊代優化流程"""
@@ -66,6 +81,32 @@ class MeetingOptimizer:
             self.evaluator = MeetingEvaluator(eval_config)
         else:
             self.evaluator = None
+            
+        # 初始化語意分段優化器
+        if SEMANTIC_OPTIMIZER_AVAILABLE and config.enable_semantic_segmentation:
+            # 使用正確的 SemanticConfig 創建語意優化器
+            semantic_config = SemanticConfig(
+                max_iterations=config.max_iterations,
+                quality_threshold=config.quality_threshold,
+                min_improvement=config.min_improvement,
+                strategy_max_count=config.strategy_max_count,
+                model_name=config.model_name,
+                optimization_model=config.optimization_model,
+                enable_early_stopping=config.enable_early_stopping,
+                save_all_iterations=config.save_all_iterations,
+                enable_semantic_segmentation=True,
+                semantic_model=config.semantic_model,
+                max_segment_length=config.max_segment_length
+            )
+            self.semantic_optimizer = SemanticMeetingOptimizer(
+                model_name=config.semantic_model,
+                enable_semantic_segmentation=True
+            )
+            self.logger.info(f"語意分段功能已啟用，使用模型: {config.semantic_model}")
+        else:
+            self.semantic_optimizer = None
+            if config.enable_semantic_segmentation:
+                self.logger.warning("語意分段模組不可用，將使用標準處理模式")
             
     def _setup_logger(self) -> logging.Logger:
         """設置日誌"""
@@ -247,7 +288,7 @@ class MeetingOptimizer:
                 return None
             
             # 如果有多個同維度策略，選擇「較弱」的進行替換
-            # 這裡簡化為選擇第一個同維度策略進行替换
+            # 這裡簡化為選擇第一個同維度策略進行替換
             strategy_to_replace = same_dimension_strategies[0]
             
             # 執行替換
@@ -648,7 +689,42 @@ class MeetingOptimizer:
         return "".join(prompt_parts)
     
     def _generate_minutes(self, prompt: str) -> Tuple[str, float]:
-        """使用 LLM 生成會議記錄"""
+        """使用 LLM 生成會議記錄 - 支援語意分段處理"""
+        # 如果啟用語意分段且有語意分段優化器，使用語意分段流程
+        if self.semantic_optimizer and self.config.enable_semantic_segmentation:
+            try:
+                # 從提示詞中提取逐字稿部分（簡化實現）
+                # 這裡需要更好的提示詞解析，暫時使用簡單方式
+                self.logger.info("使用語意分段優化器處理")
+                
+                # 構建虛擬數據結構給語意分段優化器
+                fake_data = [{
+                    'transcript': prompt,  # 暫時用整個提示詞
+                    'metadata': {
+                        'meeting_date': datetime.now().strftime('%Y-%m-%d'),
+                        'meeting_type': '會議',
+                        'participants': []
+                    }
+                }]
+                
+                # 基本模板和策略
+                template = "請根據以下逐字稿生成會議記錄：{transcript}"
+                strategy = {"name": "基本策略", "description": "標準會議記錄生成"}
+                
+                start_time = time.time()
+                result = self.semantic_optimizer._generate_minutes_batch(fake_data, template, strategy)
+                execution_time = time.time() - start_time
+                
+                if result and len(result) > 0:
+                    self.logger.info("語意分段處理完成")
+                    return result[0], execution_time
+                else:
+                    self.logger.warning("語意分段處理失敗，回退到標準處理")
+                    
+            except Exception as e:
+                self.logger.warning(f"語意分段處理出錯: {e}，回退到標準處理")
+        
+        # 標準處理流程
         try:
             start_time = time.time()
             result = subprocess.run(
@@ -1195,6 +1271,12 @@ def main():
                        help="策略優化模型")
     parser.add_argument("--disable-early-stopping", action="store_true",
                        help="禁用提前停止")
+    parser.add_argument("--enable-semantic-segmentation", action="store_true",
+                       help="啟用語意分段功能")
+    parser.add_argument("--semantic-model", type=str, default="gemma3:12b",
+                       help="語意分段模型")
+    parser.add_argument("--max-segment-length", type=int, default=4000,
+                       help="最大分段長度")
     
     args = parser.parse_args()
     
@@ -1204,7 +1286,10 @@ def main():
         quality_threshold=args.quality_threshold,
         model_name=args.model,
         optimization_model=args.optimization_model,
-        enable_early_stopping=not args.disable_early_stopping
+        enable_early_stopping=not args.disable_early_stopping,
+        enable_semantic_segmentation=args.enable_semantic_segmentation,
+        semantic_model=args.semantic_model,
+        max_segment_length=args.max_segment_length
     )
     
     # 創建優化器

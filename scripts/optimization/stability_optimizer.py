@@ -71,7 +71,7 @@ class StabilityOptimizer:
         warmup_iterations: int = 2,
         early_stopping_rounds: int = 3,
         min_improvement: float = 0.01,
-        output_dir: str = "./optimized_results",
+        output_dir: str = "./results/optimized",
         generation_model: str = "cwchang/llama3-taide-lx-8b-chat-alpha1:latest",
     ) -> None:
         """
@@ -171,7 +171,8 @@ class StabilityOptimizer:
                 timeout=600,  # 增加超時時間
             )
             response.raise_for_status()
-            return response.json().get("response", "")
+            result = response.json().get("response", "")
+            return str(result) if result is not None else ""
         except Exception as e:
             self.logger.error(f"生成文本時出錯 (模型: {model}): {str(e)}")
             return ""
@@ -477,7 +478,7 @@ class StabilityOptimizer:
             self.logger.warning("發生錯誤，將返回原始模板")
             return template  # 發生錯誤時返回原始模板
     
-    def _setup_logging(self):
+    def _setup_logging(self) -> None:
         """設置日誌記錄"""
         log_dir = self.output_dir / "logs"
         log_dir.mkdir(exist_ok=True, parents=True)
@@ -573,10 +574,24 @@ class StabilityOptimizer:
                 # log metrics 內容
                 self.logger.info(f"本輪 metrics: {metrics}")
                 # 計算總體分數
-                stability_score = metrics["stability_score"]
-                quality_score = metrics["quality_score"]
+                stability_score_val = metrics["stability_score"]
+                quality_score_val = metrics["quality_score"]
+                
+                # 確保這些值是 float 類型
+                stability_score = float(stability_score_val) if isinstance(stability_score_val, (int, float)) else 0.0
+                quality_score = float(quality_score_val) if isinstance(quality_score_val, (int, float)) else 0.0
+                
                 overall_score = (stability_score * 0.6) + (quality_score * 0.4)
                 self.logger.info(f"穩定性分數: {stability_score:.4f}, 質量分數: {quality_score:.4f}, 總體分數: {overall_score:.4f}")
+                
+                # 創建僅包含 float 值的 metrics 字典給 OptimizationResult
+                float_metrics: Dict[str, float] = {}
+                for key, value in metrics.items():
+                    if isinstance(value, (int, float)):
+                        float_metrics[key] = float(value)
+                    else:
+                        float_metrics[key] = 0.0  # 預設值
+                
                 # 保存結果
                 result = OptimizationResult(
                     iteration=i,
@@ -584,7 +599,7 @@ class StabilityOptimizer:
                     stability_score=stability_score,
                     quality_score=quality_score,
                     overall_score=overall_score,
-                    metrics=metrics
+                    metrics=float_metrics
                 )
                 self.optimization_history.append(result)
                 # 更新最佳結果
@@ -596,10 +611,10 @@ class StabilityOptimizer:
                     self.logger.info(f"達到穩定性閾值 {self.stability_threshold}，停止優化")
                     break
                     
-                # 選擇並應用優化策略（傳入完整 metrics）
-                strategy = self._select_optimization_strategy(metrics)
+                # 選擇並應用優化策略（只傳入數值指標）
+                strategy = self._select_optimization_strategy(float_metrics)
                 self.logger.info(f"應用優化策略: {strategy.__name__}")
-                new_template = strategy(template, metrics)
+                new_template = strategy(template, metrics)  # 傳入完整 metrics 給策略
                 if new_template and new_template != template:
                     template = new_template
                     self.logger.info("模板已更新")
@@ -682,7 +697,7 @@ class StabilityOptimizer:
         
         return scores
     
-    def _evaluate_quality(self, generated: str, reference: str) -> Dict[str, float]:
+    def _evaluate_quality(self, generated: str, reference: str) -> Dict[str, Union[float, Dict[str, Any], str]]:
         """
         使用多種指標評估生成文本的質量
         
@@ -759,10 +774,16 @@ class StabilityOptimizer:
                 self.logger.debug(f"台灣會議記錄評估原始分數: {taiwan_scores}")
                 
                 # 提取主要分數，確保所有分數都在 0-1 範圍內
-                taiwan_meeting_score = max(0.0, min(1.0, taiwan_scores.get('taiwan_meeting_score', 0.0)))
-                structure_score = max(0.0, min(1.0, taiwan_scores.get('structure_score', 0.0)))
-                taiwan_context_score = max(0.0, min(1.0, taiwan_scores.get('taiwan_context_score', 0.0)))
-                action_specificity_score = max(0.0, min(1.0, taiwan_scores.get('action_specificity_score', 0.0)))
+                def safe_float(value: Union[float, str], default: float = 0.0) -> float:
+                    """安全地將值轉換為 float"""
+                    if isinstance(value, (int, float)):
+                        return max(0.0, min(1.0, float(value)))
+                    return default
+                
+                taiwan_meeting_score = safe_float(taiwan_scores.get('taiwan_meeting_score', 0.0))
+                structure_score = safe_float(taiwan_scores.get('structure_score', 0.0))
+                taiwan_context_score = safe_float(taiwan_scores.get('taiwan_context_score', 0.0))
+                action_specificity_score = safe_float(taiwan_scores.get('action_specificity_score', 0.0))
                 
                 # 計算內容完整性分數（基於其他分數的加權平均）
                 content_completeness_score = max(0.0, min(1.0, (
@@ -777,8 +798,7 @@ class StabilityOptimizer:
                     'structure_score': structure_score,
                     'taiwan_context_score': taiwan_context_score,
                     'action_specificity_score': action_specificity_score,
-                    'content_completeness_score': content_completeness_score,
-                    'detailed_scores': taiwan_scores
+                    'content_completeness_score': content_completeness_score
                 })
                 
                 # 記錄詳細評估結果
@@ -795,21 +815,27 @@ class StabilityOptimizer:
             except Exception as e:
                 error_msg = f"使用台灣會議記錄評估器時出錯: {str(e)}"
                 self.logger.error(error_msg, exc_info=True)
-                combined_score = result.get('bert_score_f1', 0.0)
+                combined_score = safe_float(result.get('bert_score_f1', 0.0))
                 result.update({
-                    'taiwan_meeting_score': combined_score,
-                    'structure_score': combined_score,
-                    'taiwan_context_score': combined_score,
-                    'action_specificity_score': combined_score,
-                    'content_completeness_score': combined_score,
-                    'error': error_msg
+                    'taiwan_meeting_score': taiwan_meeting_score,
+                    'structure_score': structure_score,
+                    'taiwan_context_score': taiwan_context_score,
+                    'action_specificity_score': action_specificity_score,
+                    'content_completeness_score': content_completeness_score
                 })
             
             # 計算綜合分數
             result['combined_score'] = combined_score
             
             self.logger.debug(f"質量評估完成 - 綜合分數: {combined_score:.4f}")
-            return result
+            # 確保返回的字典只包含數值型別（過濾掉字串和字典型別的值）
+            filtered_result: Dict[str, Union[float, Dict[str, Any], str]] = {}
+            for k, v in result.items():
+                if isinstance(v, (int, float)):
+                    filtered_result[k] = float(v)
+                elif k == 'combined_score':  # 確保 combined_score 被包含
+                    filtered_result[k] = float(combined_score)
+            return filtered_result
             
         except Exception as e:
             self.logger.error(f"評估質量時出錯: {str(e)}", exc_info=True)
@@ -1024,12 +1050,15 @@ class StabilityOptimizer:
         
         try:
             rouge = Rouge()
-            scores = rouge.get_scores(generated, reference)[0]
+            rouge_results = rouge.get_scores(generated, reference)
+            
+            # 使用 type: ignore 來處理 rouge 庫的類型問題
+            scores = rouge_results[0]  # type: ignore
             
             return {
-                "rouge1": scores["rouge-1"]["f"],
-                "rouge2": scores["rouge-2"]["f"],
-                "rougeL": scores["rouge-l"]["f"]
+                "rouge1": scores["rouge-1"]["f"],  # type: ignore
+                "rouge2": scores["rouge-2"]["f"],  # type: ignore
+                "rougeL": scores["rouge-l"]["f"]   # type: ignore
             }
         except Exception as e:
             self.logger.warning(f"計算 ROUGE 分數時出錯: {str(e)}")
@@ -1136,7 +1165,7 @@ class StabilityOptimizer:
 
 def optimize_meeting_minutes(
     reference_dir: str,
-    output_dir: str = "optimized_results",
+    output_dir: str = "results/optimized",
     model_name: str = "gemma3:12b",
     generation_model: str = "cwchang/llama3-taide-lx-8b-chat-alpha1:latest",
     stability_threshold: float = 0.65,
@@ -1263,8 +1292,8 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="會議記錄優化工具")
     parser.add_argument("reference_dir", type=str, help="包含參考會議記錄的目錄")
-    parser.add_argument("-o", "--output-dir", default="optimized_results",
-                      help="輸出目錄（默認：optimized_results）")
+    parser.add_argument("-o", "--output-dir", default="results/optimized",
+                      help="輸出目錄（默認：results/optimized）")
     parser.add_argument("--model", 
                       default="gemma3:12b",
                       help="使用的模型名稱（默認：gemma3:12b）")

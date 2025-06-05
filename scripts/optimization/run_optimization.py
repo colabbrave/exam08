@@ -165,8 +165,8 @@ def main():
                       help='包含逐字稿的目錄')
     parser.add_argument('--reference-dir', type=str, required=True,
                       help='包含參考會議記錄的目錄')
-    parser.add_argument('-o', '--output-dir', default='optimized_results',
-                      help='輸出目錄（默認：optimized_results）')
+    parser.add_argument('-o', '--output-dir', default='results/optimized',
+                      help='輸出目錄（默認：results/optimized）')
     parser.add_argument('--model', default="cwchang/llama3-taide-lx-8b-chat-alpha1:latest",
                       help='使用的模型名稱（默認：cwchang/llama3-taide-lx-8b-chat-alpha1:latest）')
     parser.add_argument('--max-iterations', type=int, default=100,
