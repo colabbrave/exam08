@@ -136,6 +136,30 @@ MIT 授權條款允許您：
    - 提供建設性的意見
    - 確保符合專案標準
 
+## 效能基準與最佳分數
+
+本專案針對市政會議逐字稿自動化優化，設有多輪策略組合與分數評估。以下為截至 2025/6/6 之最佳效能紀錄：
+
+- **目前最佳 overall_score**：`0.777`
+- **對應 iteration**：第671次市政會議 iteration_03
+- **策略組合**：A_role_definition_A1、B_structure_B1、C_summary_C1
+- **使用模型**：cwchang/llama3-taide-lx-8b-chat-alpha1:latest
+- **其他高分紀錄**：
+  - iteration_02：overall_score 0.7069（A_role_definition_A1、B_structure_B1、E_simple_E4）
+  - iteration_00：overall_score 0.6636（A_role_definition_A1、B_structure_B1、C_summary_C1）
+  - iteration_14：overall_score 0.5197（A_facilitator_A2、B_structure_B1、C_context_C4）
+
+### 效能評估指標
+
+- length_score、structure_score、format_score、content_richness、professionalism、overall_score 等多維度評分
+- 以 overall_score 作為主要優化依據
+
+### 優化方向與建議
+
+- 目前最佳分數已達 0.777，建議持續針對結構、內容豐富度與專業度進行微調
+- 可嘗試不同策略組合與模型微調，提升穩定性與泛用性
+- 詳細優化歷程與策略組合請參見 `results/iterations/` 及 docs/PROJECT_FINAL_OPTIMIZATION_REPORT.md
+
 ## 聯絡方式
 
 - 專案維護者：[維護者姓名]
