@@ -204,3 +204,5 @@ results/optimized/*.txt
 
 # Project specific ignores
 test_import.pyp
+archive/*.tar.gz
+archive/by_date/**/*.tar.gz
