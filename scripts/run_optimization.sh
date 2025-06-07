@@ -2,11 +2,12 @@
 
 # 設置腳本目錄
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cd "$SCRIPT_DIR"
+PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
+cd "$PROJECT_ROOT"
 
 # 設置日誌文件
 timestamp=$(date +%Y%m%d_%H%M%S)
-LOG_DIR="logs"
+LOG_DIR="$SCRIPT_DIR/logs"
 LOG_FILE="$LOG_DIR/optimization_${timestamp}.log"
 mkdir -p "$LOG_DIR"
 
@@ -17,9 +18,9 @@ log() {
 }
 
 log "=== 會議記錄優化與評估系統 - 依據 act.md 流程 ==="
-log "日誌已初始化，日誌文件: $SCRIPT_DIR/$LOG_FILE"
+log "日誌已初始化，日誌文件: $LOG_FILE"
 log "執行命令: $0 $*"
-log "工作目錄: $SCRIPT_DIR"
+log "工作目錄: $PROJECT_ROOT"
 
 # 解析命令行參數
 MODEL="cwchang/llama3-taide-lx-8b-chat-alpha1:latest"
@@ -95,9 +96,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 # 設置環境變量
-export TRANSCRIPT_DIR="$TRANSCRIPT_DIR"
-export REFERENCE_DIR="$REFERENCE_DIR"
-export OUTPUT_DIR="results"
+export TRANSCRIPT_DIR="$PROJECT_ROOT/data/transcript"
+export REFERENCE_DIR="$PROJECT_ROOT/data/reference"
+export OUTPUT_DIR="$PROJECT_ROOT/results"
 
 # 創建必要的目錄
 mkdir -p "$TRANSCRIPT_DIR" "$REFERENCE_DIR" "$OUTPUT_DIR" "results/optimized" "results/iterations"
@@ -128,8 +129,8 @@ log "使用生成模型: $MODEL"
 log "使用策略優化模型: $OPTIMIZATION_MODEL"
 log "最大疊代次數: $MAX_ITERATIONS"
 log "品質閾值: $QUALITY_THRESHOLD"
-log "逐字稿目錄: $SCRIPT_DIR/$TRANSCRIPT_DIR"
-log "參考目錄: $SCRIPT_DIR/$REFERENCE_DIR"
+log "逐字稿目錄: $TRANSCRIPT_DIR"
+log "參考目錄: $REFERENCE_DIR"
 log "語意分段功能: $ENABLE_SEMANTIC_SEGMENTATION"
 if [ "$ENABLE_SEMANTIC_SEGMENTATION" = true ]; then
     log "語意分段模型: $SEMANTIC_MODEL"
